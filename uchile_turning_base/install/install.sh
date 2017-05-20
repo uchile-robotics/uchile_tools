@@ -10,7 +10,7 @@
 #
 
 # - - - - - - S E T U P - - - - - - - -
-source "$BENDER_WS"/bender_system/install/pkg_install.bash
+source "$UCHILE_WS"/system/install/util/pkg_install.bash
 
 
 # Color
@@ -25,7 +25,7 @@ installer="${bold}[uchile_turning_base]:${reset}"
 
 #  - - - - - - - - - Install Rules - - - - - - - - - - - 
 echo "$installer Installing udev rules"
-bender_cd uchile_turning_base
+uchile_cd uchile_turning_base
 sudo cp -f install/10-uchile_turning_base.rules /etc/udev/rules.d/10-uchile_turning_base.rules
 sudo udevadm control --reload
 
