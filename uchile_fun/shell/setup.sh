@@ -19,7 +19,7 @@ uchile_fun () {
     fi
 
     if hash zsnes 2>/dev/null; then
-    	bender_cd uchile_fun
+    	uchile_cd uchile_fun
     	zsnes database/games/fun.zip
     fi
 }
