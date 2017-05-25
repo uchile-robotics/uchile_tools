@@ -1,114 +1,73 @@
-"""
-Copyright(c) <Florian Lier>
-This file may be licensed under the terms of the
-GNU Lesser General Public License Version 3 (the ``LGPL''),
-or (at your option) any later version.
-Software distributed under the License is distributed
-on an ``AS IS'' basis, WITHOUT WARRANTY OF ANY KIND, either
-express or implied. See the LGPL for the specific language
-governing rights and limitations.
-You should have received a copy of the LGPL along with this
-program. If not, go to http://www.gnu.org/licenses/lgpl.html
-or write to the Free Software Foundation, Inc.,
-51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
-The development of this software was supported by the
-Excellence Cluster EXC 277 Cognitive Interaction Technology.
-The Excellence Cluster EXC 277 is a grant of the Deutsche
-Forschungsgemeinschaft (DFG) in the context of the German
-Excellence Initiative.
-Authors: Florian Lier
-<flier>@techfak.uni-bielefeld.de
-"""
+#!/usr/bin/env python
 
-# STD IMPORTS
-import sys
-import time
-import signal
-import psutil
-import threading
-import subprocess
-from optparse import OptionParser
-
+__author__ = "Luz Martinez"
 
 import rospy
 import roslib
-from std_msgs.msg import Bool, String
+import time
+import signal
+import psutil
+import subprocess
 
+from threading import Thread, Lock
 
-class ROSRecordConnector(threading.Thread):
+from uchile_srvs.srv import RosbagRecord, RosbagRecordResponse
 
-    def __init__(self, _filename, _inscope, _triggerscope, _msglimit):
-        threading.Thread.__init__(self)
-        self.is_running = True
-        self.filename = _filename.strip()
-        self.listen_topic = _triggerscope
-        self.inscope = _inscope
-        self.msglimit = _msglimit
-        self.recordprocess = None
+class ROSRecordConnector(Thread):
+    """
+    Base class for ROSRecordConnector
+    """
+    _type = "rosbag_record"
 
-    def record_string_callback(self, ros_data):
-        if ros_data.data.lower().endswith(":start"):
-            # extract filename
-            idx = ros_data.data.lower().rfind(":start")
-            newfilename = ros_data.data[0:idx]
-            if len(newfilename) > 0 and newfilename.find(' ') == -1:
-                self.record_handling(True, newfilename)
-            else:
-                print ">>> [ROS] Record filename malformed: '%s'. Should not be empty or contain spaces, using default name" % newfilename
-                self.record_handling(True, self.filename)
+    def __init__(self):
+        Thread.__init__(self)
+        self._description = "Rosbag Record"
+
+        self.namespace_prefix = (rospy.get_namespace()+'/'+ROSRecordConnector._type+'/').replace('//','/')
+        self.active_service = rospy.Service(self.namespace_prefix+'active', RosbagRecord, self._active)
+
+        self.msglimit = None#_msglimit #TODO
+        self._control = {'id_name': ""}
+
+    def _active(self, req):
+        if req.status:
+            self._control[req.id_name] = {'status': True, 'process': None, 'topics': " ".join(req.topics), 'bag_filename': req.bag_filename}
+            rospy.loginfo("Turning rosbag record. id : "+req.id_name)
         else:
-            if ros_data.data.lower().endswith(":stop"):
-                self.record_handling(False)
-            else:
-                # invalid message
-                print ">>> [ROS] Record request invalid: %s. Should contain filename:start or :stop" % ros_data.data
-                return
+            rospy.loginfo("Turning off rosbag record. id : "+req.id_name)
 
-    def record_bool_callback(self, ros_data):
-        self.record_handling(ros_data.data, self.filename)
+        if req.id_name in self._control:
+            self.record_handling(req.status, self._control[req.id_name])
 
-    def record_handling(self, record, filename=None):
-        if (record and self.recordprocess is not None and self.recordprocess.is_recording):
-            return False # already recording 
+        return RosbagRecordResponse()
 
-        if (not record and self.recordprocess is None):
-            return False  # already stopped
-        if self.recordprocess is not None:
-            print ">>> [ROS] Record status: %s" % str(self.recordprocess.is_recording)
-        else:
-            print ">>> [ROS] Record status: %s" % False
+
+    def record_handling(self, record, control_node=None):      # already recording 
+        if (record and control_node['process'] is not None and control_node['process'].is_recording):
+            return False 
+
+        if (not record and control_node['process'] is None):   # already stopped
+            return False  
+
           
-        if record and filename is not None:
-            self.recordprocess = RecordBAG(filename, self.inscope, self.msglimit)
-            self.recordprocess.start()
+        if record and control_node['bag_filename'] is not None:
+            control_node['process'] = RecordBAG(control_node['bag_filename'], control_node['topics'], self.msglimit)
+            control_node['process'].start()
             return True
         else:
-            if self.recordprocess is not None:
-                if self.recordprocess.stop():
-                    self.recordprocess = None
+            if control_node['process'] is not None:
+                if control_node['process'].stop():
+                    control_node['process'] = None
                     return True
                 else:
                     return False
             return True
 
-    def run(self):
-        print ">>> [ROS] Initializing ROSBAG REMOTE RECORD of: %s" % self.inscope.strip()
-        ros_subscriber = rospy.Subscriber(self.listen_topic, Bool, self.record_bool_callback, queue_size=1)
-        ros_subscriber2 = rospy.Subscriber(self.listen_topic + "/named", String, self.record_string_callback, queue_size=1)
-        print ">>> [ROS] Waiting for Bool (true for start) on topic : %s" % self.listen_topic
-        print ">>> [ROS] Waiting for filename:start on topic : %s" % self.listen_topic + "/named"
-        while self.is_running is True:
-            time.sleep(0.05)
-        if self.recordprocess is not None:
-            self.recordprocess.stop()
-        ros_subscriber.unregister()
-        ros_subscriber2.unregister()
-        print ">>> [ROS] Stopping ROSBAG REMOTE RECORD %s" % self.inscope.strip()
 
 
-class RecordBAG(threading.Thread):
+class RecordBAG(Thread):
     def __init__(self, _name, _scope, _msg_limit=None):
-        threading.Thread.__init__(self)
+        Thread.__init__(self)
         self.name = _name.strip()
         self.scope = _scope.strip()
         self.is_recording = False
@@ -116,11 +75,10 @@ class RecordBAG(threading.Thread):
         self.msg_limit = _msg_limit
 
     def stop(self):
-        print ">>> Received STOP"
-        if not self.is_recording:
-            print ">>> Already stopped"
+        if not self.is_recording: # already stopped
             return True
         self.is_recording = False
+
         try:
             p = psutil.Process(self.process.pid)
             try:
@@ -135,81 +93,29 @@ class RecordBAG(threading.Thread):
                     self.process.send_signal(signal.SIGINT)
                 return True
         except Exception as e:
-            print ">>> Maybe the process is already dead? %s" % str(e)
+            rospy.logwar( "The process is already dead? " )
             return False
 
     def run(self):
-        print ">>> Recording: %s now" % self.scope
-        print ">>> Filename:  %s-%s.bag %s" % (self.name, str(time.time()), self.scope)
+        rospy.loginfo( " Recording topics: {} ".format( self.scope) )
+        rospy.loginfo( " Filename:  {}.bag " .format(self.name) )
         
         if self.msg_limit is not None:
-            print ">>> stopping after %s messages" % str(self.msg_limit)
-            self.process = subprocess.Popen("rosbag record -l %s -O %s-%s.bag %s" % (str(self.msg_limit), self.name, str(time.time()), self.scope), shell=True)
+            rospy.loginfo( "  stopping after {} messages" .format(str(self.msg_limit) ) )
+            self.process = subprocess.Popen("rosbag record -l %s -O %s.bag %s" % (str(self.msg_limit), self.name, self.scope), shell=True)
         else:
-            self.process = subprocess.Popen("rosbag record -O %s-%s.bag %s" % (self.name, str(time.time()), self.scope), shell=True)
+            self.process = subprocess.Popen("rosbag record -O %s.bag %s" % (self.name, self.scope), shell=True)
         self.is_recording = True
         self.process.wait()
-        print ">>> Recording: %s stopped" % self.scope
+        rospy.loginfo( " Recording: {} stopped" .format( self.scope) )
         self.is_recording = False
 
 
-def signal_handler(sig, frame):
-    """
-    Callback function for the signal handler, catches signals
-    and gracefully stops the application, i.e., exit subscribers
-    before killing the main thread.
-    :param sig the signal number
-    :param frame frame objects represent execution frames.
-    """
-    print ">>> Exiting (signal %s)..." % str(sig)
-    r.is_running = False
-    print ">>> Bye!"
-    sys.exit(0)
-
-#python rosbag_remote_record.py -m ros -i /xtion/rgb/image_raw /something/else /another/topic -f testfile
-#rostopic pub /meka/rosbagremote/record std_msgs/Bool True
-#rostopic pub /meka/rosbagremote/record std_msgs/Bool False
 
 if __name__ == '__main__':
 
-    parser = OptionParser(usage="Usage: %prog [options]")
-    # parser.add_option("-m", "--middleware",
-    #                   action="store",
-    #                   dest="middleware",
-    #                   help="Set the middleware [ros|rsb]")
-    parser.add_option("-i", "--inscope",
-                      action="store",
-                      dest="inscope",
-                      help="Set the scopes/topics to record")
-    parser.add_option("-t", "--triggerscope",
-                      action="store",
-                      dest="triggerscope",
-                      help="Set the root scope/topic for remote control (default:/meka/rosbagremote/record)\
-                       another topic <root>/named provides a way to query a new bag file name while starting")
-    parser.add_option("-f", "--filename",
-                      action="store",
-                      dest="filename",
-                      help="The name of the file that is saved")
-    parser.add_option("-l", "--limit",
-                      action="store",
-                      dest="msglimit",
-                      help="The number of message to record before automatically stopping")
+    rospy.init_node('RosbagControl')
 
-    (options, args) = parser.parse_args()
-
-    if not options.filename or not options.inscope:# or not options.middleware:
-        print ">>> No inscope, filename given or middleware provided --> see help."
-        sys.exit(1)
-    if not options.triggerscope:
-        options.triggerscope = "/meka/rosbagremote/record"
-
-        rospy.init_node('rosbag_remote_record', anonymous=True)
-        r = ROSRecordConnector(options.filename, options.inscope, options.triggerscope, options.msglimit)
-        r.start()
-
-
-
-    signal.signal(signal.SIGINT, signal_handler)
-
-    while True:
-        time.sleep(0.2)
+    r = ROSRecordConnector( )
+    r.start()
+    rospy.spin()
