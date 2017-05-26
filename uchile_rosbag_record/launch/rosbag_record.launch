@@ -1,0 +1,6 @@
+<launch>
+
+	<!-- rosbag record -->
+	<node  pkg="uchile_rosbag_record" type="rosbag_remote_control.py" name="rosbag_remote_control" ns="/bender/rosbag_control/"/>
+
+</launch>
