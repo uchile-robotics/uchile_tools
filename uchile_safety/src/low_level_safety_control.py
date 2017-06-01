@@ -3,19 +3,19 @@ __author__ = 'Diego Bano'
 __email__  = 'diego.bano@ug.uchile.cl'
 
 import rospy
-from math import sin, cos, atan2, pi, sqrt, pow as mpow
+from math import sin, cos, atan2, pi, sqrt, pow as mpow, isnan
 import numpy
 import roslib
 import tf
-roslib.load_manifest("uchile_safety")
+roslib.load_manifest("bender_safety")
 
 from threading import Thread, Lock
 from geometry_msgs.msg import Twist, PoseStamped
 from visualization_msgs.msg import Marker
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import LaserScan
-from uchile_srvs.srv import Transformer
-
+from bender_srvs.srv import Transformer
+from std_msgs.msg import Empty
 
 class CmdVelSafety(object):
     """Basic Bender safety"""
@@ -51,12 +51,14 @@ class CmdVelSafety(object):
                                                     laser_pose.pose.position.y,
                                                     laser_pose.pose.position.z], 
                                                     [0,0,0])
+        self.prev_front_scan = [0.01] * 1500
+        self.prev_rear_scan = [0.01] * 500
 
         # Security tune-up variables
-        self.max_rad = .4
+        self.max_rad = .6
         self.laser_range = pi / 9
-        self.stoping_acc = 0.2
-        self.epsilon = 0.001
+        self.stoping_acc = 0.35
+        self.epsilon = 0.01
         # Subscriber variables
         self.curr_vel = Twist()
         self.sent_vel = 0
@@ -82,6 +84,8 @@ class CmdVelSafety(object):
         self.marker = self.setup_marker()
         self.marker_pub = rospy.Publisher("/bender/markers/corrected_footprint", Marker, queue_size=1)
 
+        self.safety_pub = rospy.Publisher("/bender/nav/low_level_mux/obstacle", Empty, queue_size=1)
+
         # last message
         self.last_msg = Twist()
         self.last_msg_time = rospy.Time.now()
@@ -104,14 +108,18 @@ class CmdVelSafety(object):
                                             trans_rear * sin(rot_rear), 
                                             0], 
                                             [0,0,0])
-                #rospy.loginfo("dist front %f m, dist rear %f m" % (dist_front, dist_rear))
+                rospy.loginfo("dist front %f m, dist rear %f m" % (dist_front, dist_rear))
 
                 # Chosing closest point between front and back
-                closest = min(dist_rear, dist_front)
-                if dist_front < dist_rear:
+                if self.sent_vel > 0:
+                    closest = dist_front
                     clos_ang = rot_front
-                else:
+                elif self.sent_vel < 0:
+                    closest = dist_rear
                     clos_ang = rot_rear + pi
+                else:
+                    closest = min(dist_front, dist_rear)
+                    clos_ang = rot_front if dist_front < dist_rear else rot_rear + pi
 
                 # Calculating correction factor
                 corr_factor = self.get_correction_factor(clos_ang)
@@ -120,10 +128,13 @@ class CmdVelSafety(object):
                 rospy.loginfo("Closer point at %f m from the center with a %f correction_factor" % (closest, corr_factor))
 
                 # Check if closest point is inside the safety area, in which case, stop movement if velocity moves the base in that direction
-                if closest <= self.max_rad + abs(corr_factor) and corr_factor * self.sent_vel > 0:
+                if closest <= self.max_rad + abs(corr_factor) and self.sent_vel * corr_factor >= 0:
                     rospy.loginfo("Collision detected, stopping movement")
+                    self.safety_pub.publish(Empty())
                     # Publish empty Twist message to stop movement
-                    self.pub.publish(Twist())
+                    msg = Twist()
+                    msg.angular.z = self.curr_vel.angular.z
+                    self.pub.publish(msg)
                 # Sleep to mantain rate
                 self.rate_pub.sleep()
         except Exception as e:
@@ -157,7 +168,7 @@ class CmdVelSafety(object):
         Returns:
             float: Correction factor, > 0 if closest point is in the front, < 0 if it's in the back
         """
-        vel_factor = mpow(max(abs(self.curr_vel.linear.x), abs(self.sent_vel)), 2) / (2 * self.stoping_acc * (0.5 / max(abs(self.curr_vel.linear.x), abs(self.sent_vel)))) if self.curr_vel.linear.x != 0 else 0
+        vel_factor = mpow(max(abs(self.curr_vel.linear.x), abs(self.sent_vel)), 2) / (2 * self.stoping_acc * (0.3 / max(abs(self.curr_vel.linear.x), abs(self.sent_vel)))) if self.curr_vel.linear.x != 0 else 0
         ang_factor = 1 if cos(obj_rotation) > 0 else -1
         return vel_factor * ang_factor
 
@@ -231,34 +242,42 @@ class CmdVelSafety(object):
         #rospy.loginfo("Current min %f" % min(msg.ranges))
         min_dist = float("inf")
         min_ang = pi
+        mean = sum(msg.ranges)*1.0/len(msg.ranges)
+
         curr_values = [0, msg.ranges[0], msg.ranges[1]]
+        if not isnan(msg.ranges[0]):
+            self.prev_front_scan[0] = msg.ranges[0]
+        if not isnan(msg.ranges[1]):
+            self.prev_front_scan[1] = msg.ranges[1]
+
+        curr_mean = mean
+
         for i in range(2, len(msg.ranges)):
+            if not isnan(msg.ranges[i]):
+                self.prev_front_scan[i] = msg.ranges[i]
+
             curr_values[0] = curr_values[1]
             curr_values[1] = curr_values[2]
-            curr_values[2] = msg.ranges[i]
+            curr_values[2] = self.prev_front_scan[i]
 
-            # Average three points at a time to eliminate false positives
             curr_mean = numpy.mean(curr_values)
 
-            # Check if it's a valid point
-            if msg.range_min <= curr_mean and curr_mean <= msg.range_max:
-                curr_ang = msg.angle_min + i * msg.angle_increment
+            curr_ang = msg.angle_min + i * msg.angle_increment
 
-                turn_r = abs(self.curr_vel.linear.x / self.curr_vel.angular.z) if abs(self.curr_vel.angular.z) > self.epsilon else 0
+            turn_r = abs(self.curr_vel.linear.x / self.curr_vel.angular.z) if abs(self.curr_vel.angular.z) > self.epsilon else 0
 
-                base_ang = atan2(sin(curr_ang) * curr_mean, self.laser_front_base_dist + cos(curr_ang) * curr_mean)
+            base_ang = atan2(sin(curr_ang) * curr_mean, self.laser_front_base_dist + cos(curr_ang) * curr_mean)
 
-                curr_dist = sqrt(mpow(self.laser_front_base_dist, 2) + mpow(curr_mean, 2) - 2 * self.laser_front_base_dist * curr_mean * cos(pi - curr_ang))
+            curr_dist = sqrt(mpow(self.laser_front_base_dist, 2) + mpow(curr_mean, 2) - 2 * self.laser_front_base_dist * curr_mean * cos(pi - curr_ang))
 
-                curve_dist = sqrt(mpow(curr_dist, 2) + mpow(turn_r, 2) - 2 * curr_dist * turn_r * cos(pi/2 + base_ang)) if turn_r != 0 else 0
+            curve_dist = sqrt(mpow(curr_dist, 2) + mpow(turn_r, 2) - 2 * curr_dist * turn_r * cos(pi/2 + base_ang)) if turn_r != 0 else 0
 
-                if curr_dist < min_dist and abs(curve_dist - turn_r) < self.max_rad +.2 and abs(base_ang) < self.laser_range:
-                    min_ang = base_ang
-                    min_dist = curr_dist
+            if curr_dist < min_dist and abs(curve_dist - turn_r) < self.max_rad and abs(base_ang) < self.laser_range:
+                min_ang = base_ang
+                min_dist = curr_dist
         # Update closest point variable
         self.laser_front_closest_point = [min_dist, min_ang]
         #self.laser_front_cb_rate.sleep()
-
 
     def laser_rear_input_cb(self, msg):
         """
@@ -272,30 +291,39 @@ class CmdVelSafety(object):
         """
         min_dist = float("inf")
         min_ang = pi
+        mean = sum(msg.ranges)*1.0/len(msg.ranges)
+
         curr_values = [0, msg.ranges[0], msg.ranges[1]]
+        if not isnan(msg.ranges[0]):
+            self.prev_rear_scan[0] = msg.ranges[0]
+        if not isnan(msg.ranges[1]):
+            self.prev_rear_scan[1] = msg.ranges[1]
+
+        curr_mean = mean
+
         for i in range(2, len(msg.ranges)):
+            if isnan(msg.ranges[i]):
+                continue
+
             curr_values[0] = curr_values[1]
             curr_values[1] = curr_values[2]
             curr_values[2] = msg.ranges[i]
-
-            # Average three points at a time to eliminate false positives
+            
             curr_mean = numpy.mean(curr_values)
 
-            # Check if it's a valid point
-            if msg.range_min <= curr_mean <= msg.range_max:
-                curr_ang = msg.angle_min + i * msg.angle_increment
+            curr_ang = msg.angle_min + i * msg.angle_increment
 
-                turn_r = abs(self.curr_vel.linear.x / self.curr_vel.angular.z) if abs(self.curr_vel.angular.z) > self.epsilon else 0
+            turn_r = abs(self.curr_vel.linear.x / self.curr_vel.angular.z) if abs(self.curr_vel.angular.z) > self.epsilon else 0
 
-                base_ang = atan2(sin(curr_ang) * curr_mean, self.laser_rear_base_dist + cos(curr_ang) * curr_mean)
+            base_ang = atan2(sin(curr_ang) * curr_mean, self.laser_rear_base_dist + cos(curr_ang) * curr_mean)
 
-                curr_dist = sqrt(mpow(self.laser_rear_base_dist, 2) + mpow(curr_mean, 2) - 2 * self.laser_rear_base_dist * curr_mean * cos(pi - curr_ang))
+            curr_dist = sqrt(mpow(self.laser_rear_base_dist, 2) + mpow(curr_mean, 2) - 2 * self.laser_rear_base_dist * curr_mean * cos(pi - curr_ang))
 
-                curve_dist = sqrt(mpow(curr_dist, 2) + mpow(turn_r, 2) - 2 * curr_dist * turn_r * cos(pi/2 + base_ang)) if turn_r != 0 else 0
+            curve_dist = sqrt(mpow(curr_dist, 2) + mpow(turn_r, 2) - 2 * curr_dist * turn_r * cos(pi/2 + base_ang)) if turn_r != 0 else 0
 
-                if curr_dist < min_dist and abs(curve_dist - turn_r) < self.max_rad +.2 and abs(base_ang) < self.laser_range:
-                    min_ang = base_ang
-                    min_dist = curr_dist
+            if curr_dist < min_dist and abs(curve_dist - turn_r) < self.max_rad and abs(base_ang) < self.laser_range:
+                min_ang = base_ang
+                min_dist = curr_dist
         # Update closest point variable
         self.laser_rear_closest_point = [min_dist, min_ang]
         #self.laser_rear_cb_rate.sleep()
