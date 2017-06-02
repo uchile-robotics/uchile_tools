@@ -1,0 +1,47 @@
+\documentclass[letterpaper,11pt,english]{article}
+
+\usepackage[english]{babel}
+\usepackage[utf8]{inputenc}
+\usepackage[right=2.5cm,left=2.5cm,top=3cm,bottom=2.5cm,headsep=1.0cm,footskip=0.5cm]{geometry}
+
+\usepackage[pdftex]{graphicx}
+\usepackage{float}
+
+\usepackage{tikz}
+\usetikzlibrary{positioning, calc}
+\usepackage[yyyymmdd,hhmmss]{datetime}
+
+% - - - - - H e a d e r - - - - - - - - - %
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\chead{}
+\rhead{UChile HomeBreakers}
+\lhead{Test: %{TEST_NAME} }
+\lfoot{}
+\cfoot{-\thepage -}
+\rfoot{}
+% - - - - - - - - - - - - - - - - - - - - %
+
+\begin{document}
+
+\begin{center}
+	\section*{%{TEST_NAME} Report}
+
+	Team : UChile HomeBreakers \\
+	Try Number : %{TRY} \\
+	Date : \today - \currenttime%date and time
+
+\end{center}
+
+% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+%{MAP-SECTION}
+% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+
+\section*{Objects Images}
+
+% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+%{IMG-SECTION}
+% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+\end{document} 

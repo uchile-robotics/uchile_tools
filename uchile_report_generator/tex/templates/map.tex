@@ -1,0 +1,42 @@
+
+% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+\subsection*{Environment Map}
+
+\begin{figure}[H]
+	\centering
+
+  \def\res{%{IMG-RES}}
+  \def\imgwidth{%{IMG-WIDTH}}
+  \def\imgheight{%{IMG-HEIGHT}}
+  \def\x0{%{MAP-X0}}
+  \def\y0{%{MAP-Y0}}
+  \def\personx{%{PERSON-X}}
+  \def\persony{%{PERSON-Y}}
+
+  \def\step{0.5}
+  \def\mapwidth{\res*\imgwidth}
+  \def\mapheight{\res*\imgheight}
+
+  \begin{tikzpicture}
+
+    \node[anchor=south west,inner sep=0] (image) at (0,0) {
+      \includegraphics[width=0.9\textwidth]{%{IMG-PATH}}
+    };
+
+    \begin{scope}[x={(image.south east)}, y={(image.north west)}, xscale=1/(\mapwidth), yscale=1/(\mapheight), shift={($(image.south west) + (\x0,\y0)$)}]
+    
+    \draw[help lines,xstep=\step,ystep=\step] (-\x0,-\y0) grid ({(\mapwidth)-\x0},{(\mapheight)-\y0});
+        \foreach \x in {%{GRID-X}} { \node [anchor=north] at (\x,-\y0) {\x}; }
+        \foreach \y in {%{GRID-Y}} { \node [anchor=east] at (-\x0,\y) {\y}; }
+        
+        \draw[red,ultra thick, radius=0.4] (\personx,\persony) circle;
+        \node[anchor=center,inner sep=0] (image) at (\personx,\persony) {
+            \includegraphics[scale=0.8]{%{IMG-GUY-PATH}}
+        };
+        \draw[red,ultra thick, radius=0.02] (0,0) circle;
+        \node[] at (0+0.57,0-0.21) {(0.0, 0.0)};
+    \end{scope}
+  \end{tikzpicture}
+  \caption{Environment Map. Person found at position $(x,y)=(\personx,\persony)[m]$.}
+\end{figure}
+% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
