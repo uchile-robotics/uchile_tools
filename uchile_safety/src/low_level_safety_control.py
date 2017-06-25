@@ -7,14 +7,14 @@ from math import sin, cos, atan2, pi, sqrt, pow as mpow, isnan
 import numpy
 import roslib
 import tf
-roslib.load_manifest("bender_safety")
+roslib.load_manifest("uchile_safety")
 
 from threading import Thread, Lock
 from geometry_msgs.msg import Twist, PoseStamped
 from visualization_msgs.msg import Marker
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import LaserScan
-from bender_srvs.srv import Transformer
+from uchile_srvs.srv import Transformer
 from std_msgs.msg import Empty
 
 class CmdVelSafety(object):
