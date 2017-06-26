@@ -1,0 +1,4 @@
+
+laser_front_link: /bender/sensors/laser_front_link
+laser_rear_link: /bender/sensors/laser_rear_link
+base_link: /bender/base_link
