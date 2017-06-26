@@ -13,7 +13,6 @@ from visualization_msgs.msg import Marker
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import LaserScan
 from uchile_srvs.srv import Transformer
-from std_msgs.msg import Empty
 
 
 class CmdVelSafety(object):
@@ -27,6 +26,13 @@ class CmdVelSafety(object):
 
     - Publishes a safe cmd_vel.
     - Publishes a marker to visualize dangerous outcomes on rviz.
+
+    # TODO: callbacks are too CPU heavy
+    # TODO: do not process sensors when stopped
+    # TODO: QUE SIGNIFICAN 2.0 y 0.3 en get_expansion_factor??? !!!
+    # TODO: online version
+    # TODO: permite seguir avanzando de a poco, hasta eventualmente chocar
+    # TODO: actualizar accel y deccel... usar desde params
     """
 
     def __init__(self):
@@ -56,14 +62,15 @@ class CmdVelSafety(object):
         self.prev_rear_scan = [0.01] * 500
 
         # Security tune-up variables
-        self.max_rad = 0.6
+        self.robot_radius = 0.6
         self.laser_range = pi / 9
-        self.stoping_acc = 0.35
+        self.stoping_acc = 0.35  # must be greater than 0
         self.epsilon = 0.01
 
         # Subscriber variables
         self.curr_vel = Twist()
-        self.sent_vel = 0
+        self.sent_linear_vel = 0
+        self.sent_angular_vel = 0
         self.cnt_front = 0
         self.cnt_rear = 0
 
@@ -78,20 +85,26 @@ class CmdVelSafety(object):
         # Service Clients
         self.tf_client = rospy.ServiceProxy("/bender/tf/simple_pose_transformer/transform", Transformer)
 
-        # Topic Subscribers
-        self.laser_front_sub = rospy.Subscriber('/bender/sensors/laser_front/scan_filtered', LaserScan, self.laser_front_input_cb, queue_size=1)
-        self.laser_rear_sub = rospy.Subscriber('/bender/sensors/laser_rear/scan', LaserScan, self.laser_rear_input_cb, queue_size=1)
-        self.vel_sub = rospy.Subscriber("/bender/nav/low_level_mux/cmd_vel", Twist, self.vel_output_cb, queue_size=1)
-        self.odom_sub = rospy.Subscriber("/bender/nav/odom", Odometry, self.odom_input_cb, queue_size=1)
+        # Topic Subscribers (avoid computing until setup is done)
+        self.laser_front_sub = None
+        self.laser_rear_sub = None
+        self.vel_sub = None
+        self.odom_sub = None
 
         # Topic Publishers
-        self.pub = rospy.Publisher('/bender/nav/safety/low_level/cmd_vel', Twist, queue_size=2)
-        self.safety_pub = rospy.Publisher("/bender/nav/low_level_mux/obstacle", Empty, queue_size=1)
+        self.vel_pub = rospy.Publisher('/bender/nav/safety/low_level/cmd_vel', Twist, queue_size=2)
         self.marker_pub = rospy.Publisher("/bender/nav/safety/markers", Marker, queue_size=1)
+        # self.safety_pub = rospy.Publisher("/bender/nav/low_level_mux/obstacle", Empty, queue_size=1)
 
     # =========================================================================
     # Setup Methods
     # =========================================================================
+
+    def _setup_subscribers(self):
+        self.laser_front_sub = rospy.Subscriber('/bender/sensors/laser_front/scan_filtered', LaserScan, self.laser_front_input_cb, queue_size=1)
+        self.laser_rear_sub = rospy.Subscriber('/bender/sensors/laser_rear/scan', LaserScan, self.laser_rear_input_cb, queue_size=1)
+        self.vel_sub = rospy.Subscriber("/bender/nav/low_level_mux/cmd_vel", Twist, self.vel_output_cb, queue_size=1)
+        self.odom_sub = rospy.Subscriber("/bender/nav/odom", Odometry, self.odom_input_cb, queue_size=1)
 
     def get_laser_to_base_transform(self, dist, ang, input_frame, target_frame):
         """
@@ -134,6 +147,7 @@ class CmdVelSafety(object):
                 rear_laser_pose = self.get_laser_to_base_transform(0, 0, self.laser_rear_frame, self.base_frame)
                 self.laser_front_base_dist = _distance(front_laser_pose.pose.position, Point())
                 self.laser_rear_base_dist = _distance(rear_laser_pose.pose.position, Point())
+                self._setup_subscribers()
                 return True
             except Exception as e:
                 rospy.logerr_throttle(
@@ -167,23 +181,20 @@ class CmdVelSafety(object):
             if not isnan(msg.ranges[i]):
                 self.prev_front_scan[i] = msg.ranges[i]
 
+            # moving average distance
             curr_values[0] = curr_values[1]
             curr_values[1] = curr_values[2]
             curr_values[2] = self.prev_front_scan[i]
-
             curr_mean = numpy.mean(curr_values)
 
             curr_ang = msg.angle_min + i * msg.angle_increment
 
             turn_r = abs(self.curr_vel.linear.x / self.curr_vel.angular.z) if abs(self.curr_vel.angular.z) > self.epsilon else 0
-
             base_ang = atan2(sin(curr_ang) * curr_mean, self.laser_front_base_dist + cos(curr_ang) * curr_mean)
-
             curr_dist = sqrt(mpow(self.laser_front_base_dist, 2) + mpow(curr_mean, 2) - 2 * self.laser_front_base_dist * curr_mean * cos(pi - curr_ang))
-
             curve_dist = sqrt(mpow(curr_dist, 2) + mpow(turn_r, 2) - 2 * curr_dist * turn_r * cos(pi / 2 + base_ang)) if turn_r != 0 else 0
 
-            if curr_dist < min_dist and abs(curve_dist - turn_r) < self.max_rad and abs(base_ang) < self.laser_range:
+            if curr_dist < min_dist and abs(curve_dist - turn_r) < self.robot_radius and abs(base_ang) < self.laser_range:
                 min_ang = base_ang
                 min_dist = curr_dist
 
@@ -233,7 +244,7 @@ class CmdVelSafety(object):
 
             curve_dist = sqrt(mpow(curr_dist, 2) + mpow(turn_r, 2) - 2 * curr_dist * turn_r * cos(pi / 2 + base_ang)) if turn_r != 0 else 0
 
-            if curr_dist < min_dist and abs(curve_dist - turn_r) < self.max_rad and abs(base_ang) < self.laser_range:
+            if curr_dist < min_dist and abs(curve_dist - turn_r) < self.robot_radius and abs(base_ang) < self.laser_range:
                 min_ang = base_ang
                 min_dist = curr_dist
 
@@ -242,10 +253,11 @@ class CmdVelSafety(object):
 
     def odom_input_cb(self, msg):
         self.curr_vel = msg.twist.twist
-        self.rate_pub.sleep()
+        # self.rate_pub.sleep()
 
     def vel_output_cb(self, msg):
-        self.sent_vel = msg.linear.x
+        self.sent_linear_vel = msg.linear.x
+        self.sent_angular_vel = msg.angular.z
 
     # =========================================================================
     # Aux methods
@@ -265,8 +277,8 @@ class CmdVelSafety(object):
         marker.pose.orientation.y = 0.0
         marker.pose.orientation.z = 0.0
         marker.pose.orientation.w = 1.0
-        marker.scale.x = self.max_rad
-        marker.scale.y = self.max_rad
+        marker.scale.x = self.robot_radius
+        marker.scale.y = self.robot_radius
         marker.scale.z = 0.01
         marker.color.a = 0.5
         marker.color.r = 1.0
@@ -278,21 +290,33 @@ class CmdVelSafety(object):
         self.marker.header.stamp = rospy.get_rostime()
         self.marker_pub.publish(self.marker)
 
-    def get_correction_factor(self, obj_rotation):
+    def get_expansion_factor(self, obj_rotation):
         """
-        This method calculates the correction factor necesary for safety control, considering the current velocity and the stopping
-        acceleration calculated by hand using the current Bender robot.
+        Computes a footprint expansion factor for linear movements.
+
+        It considers the current velocity and the stopping acceleration.
+        The accel is computed by hand using the real robot.
 
         Args:
-            obj_rotation (float):
-                Angle position of the closest obstacle
+            obj_rotation (float): Angle position of the closest obstacle
 
         Returns:
-            float: Correction factor, > 0 if closest point is in the front, < 0 if it's in the back
+            float: expansion factor, > 0 if closest point is in the front, < 0 if it's in the back
         """
-        vel_factor = mpow(max(abs(self.curr_vel.linear.x), abs(self.sent_vel)), 2) / (2 * self.stoping_acc * (0.3 / max(abs(self.curr_vel.linear.x), abs(self.sent_vel)))) if self.curr_vel.linear.x != 0 else 0
-        ang_factor = 1 if cos(obj_rotation) > 0 else -1
-        return vel_factor * ang_factor
+        factor = 0
+        if self.curr_vel.linear.x != 0:
+            # obs: avoid self.sent_linear_vel. because it is not the real robot velocity
+            # linear_vel = max(abs(self.curr_vel.linear.x), abs(self.sent_linear_vel))
+            linear_vel = abs(self.curr_vel.linear.x)
+            a = mpow(linear_vel, 2)  # [m^2/s^2]
+            b = (2.0 * self.stoping_acc * (0.3 / linear_vel))
+            factor = a / b
+
+        if cos(obj_rotation) > 0:
+            side_sign = 1
+        else:
+            side_sign = -1
+        return factor * side_sign
 
     # =========================================================================
     # Main Processing method
@@ -316,34 +340,61 @@ class CmdVelSafety(object):
             a_point.y = trans_rear * sin(rot_rear)
             dist_rear = _distance(a_point, Point())
 
-            rospy.loginfo("dist front %f m, dist rear %f m" % (dist_front, dist_rear))
-
-            # Chosing closest point between front and back
-            if self.sent_vel > 0:
+            # Choose between frontal and back point between front and back
+            if self.sent_linear_vel > 0:
                 closest = dist_front
                 clos_ang = rot_front
-            elif self.sent_vel < 0:
+            elif self.sent_linear_vel < 0:
                 closest = dist_rear
                 clos_ang = rot_rear + pi
             else:
                 closest = min(dist_front, dist_rear)
                 clos_ang = rot_front if dist_front < dist_rear else rot_rear + pi
 
-            # Calculating correction factor
-            corr_factor = self.get_correction_factor(clos_ang)
-            self.marker.scale.x = self.max_rad + corr_factor
+            # calculating expansion factor
+            expansion_factor = self.get_expansion_factor(clos_ang)
+            expanded_radius = self.robot_radius + abs(expansion_factor)
+
+            # visualize expansion factor
+            self.marker.scale.x = self.robot_radius + expansion_factor
             self.publish_marker()
 
-            rospy.loginfo("Closest point is at %.2f [m] from the base center. With a %.2f correction_factor" % (closest, corr_factor))
+            # rospy.loginfo_throttle(
+            #     0.4,
+            #     " - Closest point is %.2f[m] from %s." % (closest, self.base_frame)
+            #     + " Robot radius is %.2f[m] (expanded to %.2f[m], factor: %.2f)." % (self.robot_radius, expanded_radius, expansion_factor)
+            #     + " Nearest obstacles: (front: %.2f[m]), (rear: %.2f[m])" % (dist_front, dist_rear)
+            #     + " Linear velocity: %.2f[m/s]" % self.sent_linear_vel
+            # )
+            # rospy.loginfo_throttle(
+            #     0.4,
+            #     "INFO:"
+            #     + "\n- Current linear velocity: %.2f[m/s]." % (self.curr_vel.linear.x)
+            #     + "\n- Expanded current linear velocity: %.2f[m/s] " % (self.curr_vel.linear.x * expansion_factor)
+            #     + "\n- Required linear velocity: %.2f[m/s]." % (self.sent_linear_vel)
+            #     + "\n- Expanded Required linear velocity: %.2f[m/s] " % (self.sent_linear_vel * expansion_factor)
+            #     + "\n- Closest point is %.2f[m] from %s." % (closest, self.base_frame)
+            #     + "\n- Robot radius is %.2f[m] (expanded to %.2f[m], factor: %.2f)." % (self.robot_radius, expanded_radius, expansion_factor)
+            #     + "\n- Nearest obstacles: (front: %.2f[m]), (rear: %.2f[m])" % (dist_front, dist_rear)
+            # )
 
-            # Check if closest point is inside the safety area, in which case, stop movement if velocity moves the base in that direction
-            if closest <= self.max_rad + abs(corr_factor) and self.sent_vel * corr_factor >= 0:
-                rospy.loginfo("Collision detected, stopping movement")
-                self.safety_pub.publish(Empty())
-                # Publish empty Twist message to stop movement
+            # Check if closest point is inside the safety area,
+            # in which case, stop movement if velocity moves the base in that direction
+            if closest <= expanded_radius and self.sent_linear_vel * expansion_factor > 0:
+                rospy.logwarn(
+                    "Dangerous cmd_vel, deleting linear component."
+                    + "\n- Current linear velocity: %.2f[m/s]." % (self.curr_vel.linear.x)
+                    + "\n- Expanded current linear velocity: %.2f[m/s] " % (self.curr_vel.linear.x * expansion_factor)
+                    + "\n- Required linear velocity: %.2f[m/s]." % (self.sent_linear_vel)
+                    + "\n- Expanded Required linear velocity: %.2f[m/s] " % (self.sent_linear_vel * expansion_factor)
+                    + "\n- Closest point is %.2f[m] from %s." % (closest, self.base_frame)
+                    + "\n- Robot radius is %.2f[m] (expanded to %.2f[m], factor: %.2f)." % (self.robot_radius, expanded_radius, expansion_factor)
+                    + "\n- Nearest obstacles: (front: %.2f[m]), (rear: %.2f[m])" % (dist_front, dist_rear)
+                )
                 msg = Twist()
                 msg.angular.z = self.curr_vel.angular.z
-                self.pub.publish(msg)
+                self.vel_pub.publish(msg)
+                # self.safety_pub.publish(Empty())
 
         except Exception as e:
             rospy.logerr("Stopping safety controller . Because %s" % e)
