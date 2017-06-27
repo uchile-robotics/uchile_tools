@@ -29,10 +29,14 @@ class CmdVelSafety(object):
 
     # TODO: callbacks are too CPU heavy
     # TODO: do not process sensors when stopped
-    # TODO: QUE SIGNIFICAN 2.0 y 0.3 en get_expansion_factor??? !!!
     # TODO: online version
-    # TODO: permite seguir avanzando de a poco, hasta eventualmente chocar
     # TODO: actualizar accel y deccel... usar desde params
+    
+    # obs:
+    # - 0.3/vel = factor de ajusta para la decel.
+    # - >= es importante para interceptar mensajes enviados estando al lado de un obst.
+    # 		TODO: permite seguir avanzando de a poco, hasta eventualmente chocar
+    # - 
     """
 
     def __init__(self):
@@ -58,7 +62,7 @@ class CmdVelSafety(object):
         self.last_msg_time = rospy.Time.now()
 
         # ????
-        self.prev_front_scan = [0.01] * 1500
+        self.prev_front_scan = [0.01] * 1500 # ojo con el size y con los nans/inf/max+1
         self.prev_rear_scan = [0.01] * 500
 
         # Security tune-up variables
@@ -94,7 +98,7 @@ class CmdVelSafety(object):
         # Topic Publishers
         self.vel_pub = rospy.Publisher('/bender/nav/safety/low_level/cmd_vel', Twist, queue_size=2)
         self.marker_pub = rospy.Publisher("/bender/nav/safety/markers", Marker, queue_size=1)
-        # self.safety_pub = rospy.Publisher("/bender/nav/low_level_mux/obstacle", Empty, queue_size=1)
+        # self.safety_pub = rospy.Publisher("/bender/nav/low_level_mux/obstacle", Empty, queue_size=1) # enma
 
     # =========================================================================
     # Setup Methods
@@ -189,8 +193,10 @@ class CmdVelSafety(object):
 
             curr_ang = msg.angle_min + i * msg.angle_increment
 
+            # Computes turn radius based on current linear and angular velocity using r = lin_vel/ang_vel
             turn_r = abs(self.curr_vel.linear.x / self.curr_vel.angular.z) if abs(self.curr_vel.angular.z) > self.epsilon else 0
             base_ang = atan2(sin(curr_ang) * curr_mean, self.laser_front_base_dist + cos(curr_ang) * curr_mean)
+            # Computes distance of point to turning radius and only considers it if it's inside the current path
             curr_dist = sqrt(mpow(self.laser_front_base_dist, 2) + mpow(curr_mean, 2) - 2 * self.laser_front_base_dist * curr_mean * cos(pi - curr_ang))
             curve_dist = sqrt(mpow(curr_dist, 2) + mpow(turn_r, 2) - 2 * curr_dist * turn_r * cos(pi / 2 + base_ang)) if turn_r != 0 else 0
 
@@ -308,8 +314,8 @@ class CmdVelSafety(object):
             # obs: avoid self.sent_linear_vel. because it is not the real robot velocity
             # linear_vel = max(abs(self.curr_vel.linear.x), abs(self.sent_linear_vel))
             linear_vel = abs(self.curr_vel.linear.x)
-            a = mpow(linear_vel, 2)  # [m^2/s^2]
-            b = (2.0 * self.stoping_acc * (0.3 / linear_vel))
+            a = mpow(linear_vel, 3)  # [m^2/s^2]
+            b = (2.0 * self.stoping_acc * 0.3)
             factor = a / b
 
         if cos(obj_rotation) > 0:
@@ -380,7 +386,7 @@ class CmdVelSafety(object):
 
             # Check if closest point is inside the safety area,
             # in which case, stop movement if velocity moves the base in that direction
-            if closest <= expanded_radius and self.sent_linear_vel * expansion_factor > 0:
+            if closest <= expanded_radius and self.sent_linear_vel * expansion_factor >= 0:
                 rospy.logwarn(
                     "Dangerous cmd_vel, deleting linear component."
                     + "\n- Current linear velocity: %.2f[m/s]." % (self.curr_vel.linear.x)
