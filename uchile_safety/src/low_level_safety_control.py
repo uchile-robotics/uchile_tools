@@ -8,6 +8,7 @@ from math import sin, cos, atan2, pi, sqrt, pow as mpow, isnan
 import numpy
 import tf
 
+from std_msgs.msg import Empty
 from geometry_msgs.msg import Twist, Point, PoseStamped
 from visualization_msgs.msg import Marker
 from nav_msgs.msg import Odometry
@@ -98,7 +99,7 @@ class CmdVelSafety(object):
         # Topic Publishers
         self.vel_pub = rospy.Publisher('/bender/nav/safety/low_level/cmd_vel', Twist, queue_size=2)
         self.marker_pub = rospy.Publisher("/bender/nav/safety/markers", Marker, queue_size=1)
-        # self.safety_pub = rospy.Publisher("/bender/nav/low_level_mux/obstacle", Empty, queue_size=1) # enma
+        self.safety_pub = rospy.Publisher("/bender/nav/low_level_mux/obstacle", Empty, queue_size=1) # enma
 
     # =========================================================================
     # Setup Methods
@@ -400,7 +401,7 @@ class CmdVelSafety(object):
                 msg = Twist()
                 msg.angular.z = self.curr_vel.angular.z
                 self.vel_pub.publish(msg)
-                # self.safety_pub.publish(Empty())
+                self.safety_pub.publish(Empty())
 
         except Exception as e:
             rospy.logerr("Stopping safety controller . Because %s" % e)
