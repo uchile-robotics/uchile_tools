@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 2.8.3)
-project(uchile_turning_base)
+project(bender_turning_base)
 
 ## Find catkin macros and libraries
 ## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
