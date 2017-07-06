@@ -75,7 +75,7 @@ bool uchile_laser_pipeline::LaserScanSelfFilter::update(
                 &error_msg
         );
         if(!success){
-            ROS_WARN_STREAM_THROTTLE(0.2 , "Could not get transform for frame '"
+            ROS_WARN_STREAM_DELAYED_THROTTLE(2.0 , "Could not get transform for frame '"
                     << target_frame.c_str()
                     << "'. Ignoring this frame. TF Error: "
                     << error_msg.c_str()
@@ -88,7 +88,7 @@ bool uchile_laser_pipeline::LaserScanSelfFilter::update(
             tf_listener.transformPoint(input_scan.header.frame_id, link_point, link_point_transformed);
         }
         catch(tf::TransformException& ex) {
-            ROS_WARN_STREAM_THROTTLE(1, "Ignoring frame: '"
+            ROS_WARN_STREAM_DELAYED_THROTTLE(2.0, "Ignoring frame: '"
                     << target_frame.c_str()
                     << "'. Transform Exception: " << ex.what());
             continue;
