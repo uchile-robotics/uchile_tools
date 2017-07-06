@@ -49,6 +49,7 @@ class CmdVelSafety(object):
 
         # robot cinematic parameters
         self.min_linear_velocity = abs(0.01)   # [m/s] The robot wont move if issued velocity is lesser than this.
+        self.min_angular_velocity = abs(0.01)  # [m/s] The robot wont move if issued velocity is lesser than this.
         self.max_linear_velocity = abs(0.8)    # [m/s] Used to ignore too far obstacles. And to enforce velocity constraints. TODO
         self.max_angular_velocity = abs(0.8)   # [rad/s] Used to enforce velocity constraints. TODO
         self.linear_deacceleration = abs(0.3)  # m/s/s 0.3 is the nominal value for Pioneer 3AT
@@ -57,6 +58,7 @@ class CmdVelSafety(object):
         self.robot_radius = 0.4
 
         # misc
+        self.epsilon = 0.01
         self.spin_rate = rospy.Rate(10)
         self.max_obstacle_range = 2.0  # ignore obstacles outside this radius
                                        # TODO: use other params to make sure this range is not too low.
@@ -227,7 +229,12 @@ class CmdVelSafety(object):
             inflated = a / b
         return self.robot_radius + inflated
 
-    def get_linear_movement_direction(self, cmd_vel):
+    def get_curvature_radius(self):
+        if abs(self.curr_vel.angular.z) < self.epsilon:
+            return 0
+        return abs(self.curr_vel.linear.x / self.curr_vel.angular.z)
+
+    def get_linear_movement_orientation(self, cmd_vel):
         """
         Returns:
             >  +1 if the cmd_vel moves the robot forwards
@@ -239,6 +246,21 @@ class CmdVelSafety(object):
         if cmd_vel.linear.x > 0:
             return 1
         if cmd_vel.linear.x < 0:
+            return -1
+        return 0
+
+    def get_angular_movement_orientation(self, cmd_vel):
+        """
+        Returns:
+            >  +1 if the cmd_vel moves the robot clockwise
+            >   0 if the cmd_vel moves does not rotates the robot
+            >  -1 if the cmd_vel moves the robot counter-clockwise
+        """
+        if abs(cmd_vel.angular.z) < self.min_angular_velocity:
+            return 0
+        if cmd_vel.angular.z > 0:
+            return 1
+        if cmd_vel.angular.z < 0:
             return -1
         return 0
 
@@ -274,9 +296,11 @@ class CmdVelSafety(object):
 
         try:
             # --- movement properties ---
-            curr_direction = self.get_linear_movement_direction(self.curr_vel)
-            req_direction = self.get_linear_movement_direction(self.cmd_vel)
+            curr_linear_orientation = self.get_linear_movement_orientation(self.curr_vel)
+            curr_angular_orientation = self.get_angular_movement_orientation(self.curr_vel)
+            req_direction = self.get_linear_movement_orientation(self.cmd_vel)
             inflated_radius = self.get_inflated_radius()
+            curvature_radius = self.get_curvature_radius()
 
             # -- separate obstacles into useful categories --
             # lists of tuples (distance, angle) to obstacles
@@ -299,7 +323,7 @@ class CmdVelSafety(object):
             rospy.loginfo_throttle(
                 1.0, ""
                 + "\n> Movement direction:"
-                + "\n  - current  : %s." % ("FORWARD" if curr_direction > 0 else ("BACKWARDS" if curr_direction < 0 else "STOPPED"))
+                + "\n  - current  : %s." % ("FORWARD" if curr_linear_orientation > 0 else ("BACKWARDS" if curr_linear_orientation < 0 else "STOPPED"))
                 + "\n  - requested: %s." % ("FORWARD" if req_direction > 0 else ("BACKWARDS" if req_direction < 0 else "STOPPED"))
                 + "\n> Linear velocities:"
                 + "\n  - current : %.2f[m/s]." % (self.curr_vel.linear.x)
@@ -342,7 +366,15 @@ class CmdVelSafety(object):
                     self.send_velocity(self.cmd_vel)
 
             # visualization
-            self.visualize_markers(inflated_radius, inscribed_obstacles, dangerous_obstacles, potential_obstacles)
+            self.visualize_markers(
+                inflated_radius,
+                curvature_radius,
+                curr_linear_orientation,
+                curr_angular_orientation,
+                inscribed_obstacles,
+                dangerous_obstacles,
+                potential_obstacles
+            )
 
         except Exception as e:
             rospy.logerr("An error occurred. Sending stop cmd_vel to the base. Error description: %s" % e)
@@ -369,6 +401,49 @@ class CmdVelSafety(object):
     # =========================================================================
     # Visualization Methods
     # =========================================================================
+
+    def genmarker_toroid(self, time, inflated_radius, curvature_radius, linear_orientation, angular_orientation):
+        marker = Marker()
+        marker.header.frame_id = self.base_frame
+        marker.header.stamp = time
+        marker.lifetime = rospy.Duration(0.3)
+        marker.ns = "safety/obstacle_area"
+        marker.id = 0
+        marker.type = Marker.LINE_LIST
+        marker.action = Marker.ADD
+        marker.scale.x = 0.02
+        marker.color.r = 1.0
+        marker.color.g = 0.0
+        marker.color.b = 1.0
+        marker.color.a = 1.0
+        sections = 20
+        r1 = curvature_radius - self.robot_radius
+        r2 = curvature_radius + self.robot_radius
+        rm = curvature_radius
+        if curvature_radius == 0.0:
+            return marker
+        max_theta = inflated_radius / rm  # [rad] simple proportional rule
+        dtheta = max_theta / (sections - 1)
+        x0 = 0
+        y0 = linear_orientation * angular_orientation * rm
+        for i in range(sections):
+            theta = i * dtheta
+
+            dx1 = r1 * cos(theta)
+            dy1 = r1 * sin(theta)
+
+            dx2 = r2 * cos(theta)
+            dy2 = r2 * sin(theta)
+
+            x1 = x0 + linear_orientation * dy1
+            y1 = y0 - linear_orientation * angular_orientation * dx1
+
+            x2 = x0 + linear_orientation * dy2
+            y2 = y0 - linear_orientation * angular_orientation * dx2
+
+            marker.points.append(Point(x=x1, y=y1, z=0.05))
+            marker.points.append(Point(x=x2, y=y2, z=0.05))
+        return marker
 
     def genmarker_inflated_radius(self, time, inflated_radius):
         marker = Marker()
@@ -406,7 +481,11 @@ class CmdVelSafety(object):
             marker.points.append(Point(x=dx, y=dy, z=1.0))
         return marker
 
-    def visualize_markers(self, inflated_radius, inscribed_obstacles, dangerous_obstacles, potential_obstacles):
+    def visualize_markers(self,
+                          inflated_radius, curvature_radius,
+                          linear_orientation, angular_orientation,
+                          inscribed_obstacles, dangerous_obstacles, potential_obstacles):
+
         msg = MarkerArray()
         now = rospy.get_rostime()
 
@@ -435,6 +514,9 @@ class CmdVelSafety(object):
         marker_potential_obstacles.ns = "safety/potential_obstacles"
         msg.markers.append(marker_potential_obstacles)
 
+        # -- toroid --
+        marker_toroid = self.genmarker_toroid(now, inflated_radius, curvature_radius, linear_orientation, angular_orientation)
+        msg.markers.append(marker_toroid)
         self.marker_pub.publish(msg)
 
 
