@@ -27,20 +27,6 @@ class CmdVelSafety(object):
 
     - Publishes a safe cmd_vel.
     - Publishes a marker to visualize dangerous outcomes on rviz.
-
-    # TODO: callbacks are too CPU heavy 22% CPU
-    # TODO: do not process sensors when stopped?
-    # TODO: online version
-    # TODO: actualizar accel y deccel... usar desde params
-    # - previamente inscrito (en caso de puntos ciegos)
-    # TODO: reducir la velocidad en vez de dejarla en cero abruptamente
-    # TODO: escapar automáticamente?
-
-    # obs:
-    # - 0.3/vel = factor de ajusta para la decel.
-    # - >= es importante para interceptar mensajes enviados estando al lado de un obst.
-    #       TODO: permite seguir avanzando de a poco, hasta eventualmente chocar
-    # -
     """
 
     # COLORS
@@ -192,49 +178,6 @@ class CmdVelSafety(object):
     # ROS Callbacks
     # =========================================================================
 
-    def laser_front_input_cb(self, msg):
-        """
-        Laser Callback. Computes the distance and angle to the closest detected point.
-        """
-        min_dist = float("inf")
-        min_ang = pi
-        mean = sum(msg.ranges) * 1.0 / len(msg.ranges)
-
-        curr_values = [0, msg.ranges[0], msg.ranges[1]]
-        if not isnan(msg.ranges[0]):
-            self.prev_front_scan[0] = msg.ranges[0]
-        if not isnan(msg.ranges[1]):
-            self.prev_front_scan[1] = msg.ranges[1]
-
-        curr_mean = mean
-
-        for i in range(2, len(msg.ranges)):
-            if not isnan(msg.ranges[i]):
-                self.prev_front_scan[i] = msg.ranges[i]
-
-            # moving average distance
-            curr_values[0] = curr_values[1]
-            curr_values[1] = curr_values[2]
-            curr_values[2] = self.prev_front_scan[i]
-            curr_mean = numpy.mean(curr_values)
-
-            curr_ang = msg.angle_min + i * msg.angle_increment
-
-            # Computes turn radius based on current linear and angular velocity using r = lin_vel/ang_vel
-            turn_r = abs(self.curr_vel.linear.x / self.curr_vel.angular.z) if abs(self.curr_vel.angular.z) > self.epsilon else 0
-            base_ang = atan2(sin(curr_ang) * curr_mean, self.laser_front_base_dist + cos(curr_ang) * curr_mean)
-            # Computes distance of point to turning radius and only considers it if it's inside the current path
-            curr_dist = sqrt(mpow(self.laser_front_base_dist, 2) + mpow(curr_mean, 2) - 2 * self.laser_front_base_dist * curr_mean * cos(pi - curr_ang))
-            curve_dist = sqrt(mpow(curr_dist, 2) + mpow(turn_r, 2) - 2 * curr_dist * turn_r * cos(pi / 2 + base_ang)) if turn_r != 0 else 0
-
-            if curr_dist < min_dist and abs(curve_dist - turn_r) < self.robot_radius and abs(base_ang) < self.laser_range:
-                min_ang = base_ang
-                min_dist = curr_dist
-
-        # Update closest point variable
-        self.laser_front_closest_point = [min_dist, min_ang]
-        self.laser_front_cb_rate.sleep()
-
     def laser_scan_to_obstacles(self, msg, laser_distance, rotation=0.0):
         obstacles = list()
         theta_ = msg.angle_min
@@ -267,56 +210,6 @@ class CmdVelSafety(object):
 
     def laser_rear_input_cb_v2(self, msg):
         self.rear_obstacles = self.laser_scan_to_obstacles(msg, self.laser_rear_base_dist, pi)
-
-    def laser_rear_input_cb(self, msg):
-        """
-        This method is the callback function for the rear laser subscriber. It calculates the distance and angle to the closest detected point.
-
-        Args:
-            msg (LaserScan): Laser scan message from rear laser
-
-        Returns:
-            None
-        """
-        min_dist = float("inf")
-        min_ang = pi
-        mean = sum(msg.ranges) * 1.0 / len(msg.ranges)
-
-        curr_values = [0, msg.ranges[0], msg.ranges[1]]
-        if not isnan(msg.ranges[0]):
-            self.prev_rear_scan[0] = msg.ranges[0]
-        if not isnan(msg.ranges[1]):
-            self.prev_rear_scan[1] = msg.ranges[1]
-
-        curr_mean = mean
-
-        for i in range(2, len(msg.ranges)):
-            if isnan(msg.ranges[i]):
-                continue
-
-            curr_values[0] = curr_values[1]
-            curr_values[1] = curr_values[2]
-            curr_values[2] = msg.ranges[i]
-
-            curr_mean = numpy.mean(curr_values)
-
-            curr_ang = msg.angle_min + i * msg.angle_increment
-
-            turn_r = abs(self.curr_vel.linear.x / self.curr_vel.angular.z) if abs(self.curr_vel.angular.z) > self.epsilon else 0
-
-            base_ang = atan2(sin(curr_ang) * curr_mean, self.laser_rear_base_dist + cos(curr_ang) * curr_mean)
-
-            curr_dist = sqrt(mpow(self.laser_rear_base_dist, 2) + mpow(curr_mean, 2) - 2 * self.laser_rear_base_dist * curr_mean * cos(pi - curr_ang))
-
-            curve_dist = sqrt(mpow(curr_dist, 2) + mpow(turn_r, 2) - 2 * curr_dist * turn_r * cos(pi / 2 + base_ang)) if turn_r != 0 else 0
-
-            if curr_dist < min_dist and abs(curve_dist - turn_r) < self.robot_radius and abs(base_ang) < self.laser_range:
-                min_ang = base_ang
-                min_dist = curr_dist
-
-        # Update closest point variable
-        self.laser_rear_closest_point = [min_dist, min_ang]
-        self.laser_rear_cb_rate.sleep()
 
     def odom_input_cb(self, msg):
         self.curr_vel = msg.twist.twist
@@ -408,41 +301,18 @@ class CmdVelSafety(object):
     def spin_once(self):
 
         try:
-            # PS> actualmente hay obstáculos que no son considerados,
-            # y que pueden servir para determinar si el robot chocaría o no.??.
-            # ... se supone que para eso es lo del radio de curvatura.
-            #
-            # Ojo.. sólo se consideran obstáculos en el plan deseado.. pero no según la velocidad actual!
-            # pues se asume que nunca se dejarán pasar velocidades malas.
-            # (sin embargo, puede aparecer un nuevo obstáculo en el laser)
-
-            # list of tuples (distance, angle) to obstacles
-            # obstacles = list()
-            obstacles = self.front_obstacles + self.rear_obstacles
-
-            # --- filling obstacle list ---
-            # from frontal laser (only closest obstacle in desired plan)
-            # closest_front_dist = self.laser_front_closest_point[0]
-            # closest_front_ang = self.laser_front_closest_point[1]
-            # obstacles.append((closest_front_dist, closest_front_ang))
-
-            # Frontal Laser readings (only closest obstacle in desired plan)
-            # closest_rear_dist = self.laser_rear_closest_point[0]
-            # closest_rear_ang = self.laser_rear_closest_point[1]
-            # obstacles.append((closest_rear_dist, closest_rear_ang + pi))
-
             # --- movement properties ---
             curr_direction = self.get_linear_movement_direction(self.curr_vel)
             req_direction = self.get_linear_movement_direction(self.sent_vel)
             inflated_radius = self.get_inflated_radius()
 
             # -- separate obstacles into useful categories --
+            # lists of tuples (distance, angle) to obstacles
+            obstacles = self.front_obstacles + self.rear_obstacles
             inscribed_obstacles = list()  # inside robot radius
             dangerous_obstacles = list()  # inside inflated radius but not inscribed
             potential_obstacles = list()  # inside max_obstacle_range radius but neither inflated nor inscribed
             remaining_obstacles = 0
-
-            # just for logging purposes
             for obstacle in obstacles:
                 d = obstacle[0]
                 if d <= self.robot_radius:
@@ -456,9 +326,6 @@ class CmdVelSafety(object):
 
             rospy.loginfo_throttle(
                 1.0, ""
-                + "\n> Robot radius:"
-                + "\n  - baseline: %.2f[m]." % (self.robot_radius)
-                + "\n  - inflated: %.2f[m]." % (inflated_radius)
                 + "\n> Movement direction:"
                 + "\n  - current  : %s." % ("FORWARD" if curr_direction > 0 else ("BACKWARDS" if curr_direction < 0 else "STOPPED"))
                 + "\n  - requested: %s." % ("FORWARD" if req_direction > 0 else ("BACKWARDS" if req_direction < 0 else "STOPPED"))
@@ -472,30 +339,13 @@ class CmdVelSafety(object):
                 + "\n  - %3d ignored" % (remaining_obstacles)
             )
 
-            # visualization
-            self.visualize_markers(inflated_radius, inscribed_obstacles, dangerous_obstacles, potential_obstacles)
-
-            # # Uso de sent_vel requiere mutex!
-            # # justo podría llegar velocidad distinta!
-
             is_required_cmd_obsolete = False
-            # todo: modify inflation radius ... depends on this
-            # TODO: no procesar nada, en caso de que la velocidad sea obsoleta
-            # ...s asegurar que no se pierdan mensajes
-
             if is_required_cmd_obsolete:
                 # just stop the robot... no signal required
                 self.send_velocity(Twist())
                 rospy.logwarn_throttle(
                     5.0,
                     "Required cmd vel is obsolete ... stopping the robot."
-                    # + "\n- Current linear velocity: %.2f[m/s]." % (self.curr_vel.linear.x)
-                    # + "\n- Expanded current linear velocity: %.2f[m/s] " % (self.curr_vel.linear.x * expansion_factor)
-                    # + "\n- Required linear velocity: %.2f[m/s]." % (self.sent_linear_vel)
-                    # + "\n- Expanded Required linear velocity: %.2f[m/s] " % (self.sent_linear_vel * expansion_factor)
-                    # + "\n- Closest point is %.2f[m] from %s." % (closest, self.base_frame)
-                    # + "\n- Robot radius is %.2f[m] (expanded to %.2f[m], factor: %.2f)." % (self.robot_radius, expanded_radius, expansion_factor)
-                    # + "\n- Nearest obstacles: (front: %.2f[m]), (rear: %.2f[m])" % (closest_front_dist, closest_rear_dist)
                 )
             else:
                 # TODO: simulate movement
@@ -506,52 +356,13 @@ class CmdVelSafety(object):
                     self.stop_motion()
                     rospy.logwarn(
                         "Dangerous cmd_vel wont be applied!"
-                        # + "\n- Current linear velocity: %.2f[m/s]." % (self.curr_vel.linear.x)
-                        # + "\n- Expanded current linear velocity: %.2f[m/s] " % (self.curr_vel.linear.x * expansion_factor)
-                        # + "\n- Required linear velocity: %.2f[m/s]." % (self.sent_linear_vel)
-                        # + "\n- Expanded Required linear velocity: %.2f[m/s] " % (self.sent_linear_vel * expansion_factor)
-                        # + "\n- Closest point is %.2f[m] from %s." % (closest, self.base_frame)
-                        # + "\n- Robot radius is %.2f[m] (expanded to %.2f[m], factor: %.2f)." % (self.robot_radius, expanded_radius, expansion_factor)
-                        # + "\n- Nearest obstacles: (front: %.2f[m]), (rear: %.2f[m])" % (closest_front_dist, closest_rear_dist)
                     )
                 else:
                     # The velocity command is safe... send it!
                     self.send_velocity(self.sent_vel)
 
-            # Check if closest point is inside the safety area,
-            # in which case, stop movement if velocity moves the base in that direction
-            # will_collide = False
-            # could_collide = False
-            # if moving_direction != 0 and (closest_rear_dist < self.robot_radius or closest_front_dist < self.robot_radius):
-
-            #     if 0 <= inflated_radius:
-            #         pass
-
-            #     # at this point, the obstacle is inside the inflated radius
-            #     could_collide = True
-
-            #     wants_to_move_ahead = True if self.sent_linear_vel > 0 else False
-            #     wants_to_move_backwards = True if self.sent_linear_vel < 0 else False
-            #     if ((moving_direction > 0 and wants_to_move_ahead)
-            #        or (moving_direction < 0 and wants_to_move_backwards)):
-            #         pass
-
-            #     # now, the requested movement is dangerous!
-            #     will_collide = True
-            #     rospy.logwarn(
-            #         "Dangerous cmd_vel, deleting linear component."
-            #         + "\n- Current linear velocity: %.2f[m/s]." % (self.curr_vel.linear.x)
-            #         + "\n- Expanded current linear velocity: %.2f[m/s] " % (self.curr_vel.linear.x * expansion_factor)
-            #         + "\n- Required linear velocity: %.2f[m/s]." % (self.sent_linear_vel)
-            #         + "\n- Expanded Required linear velocity: %.2f[m/s] " % (self.sent_linear_vel * expansion_factor)
-            #         + "\n- Closest point is %.2f[m] from %s." % (closest, self.base_frame)
-            #         + "\n- Robot radius is %.2f[m] (expanded to %.2f[m], factor: %.2f)." % (self.robot_radius, expanded_radius, expansion_factor)
-            #         + "\n- Nearest obstacles: (front: %.2f[m]), (rear: %.2f[m])" % (closest_front_dist, closest_rear_dist)
-            #     )
-            #     msg = Twist()
-            #     msg.angular.z = self.curr_vel.angular.z
-            #     self.vel_pub.publish(msg)
-            #     self.safety_pub.publish(Empty())
+            # visualization
+            self.visualize_markers(inflated_radius, inscribed_obstacles, dangerous_obstacles, potential_obstacles)
 
         except Exception as e:
             rospy.logerr("An error occurred. Sending stop cmd_vel to the base. Error description: %s" % e)
