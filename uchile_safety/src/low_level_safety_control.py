@@ -39,9 +39,7 @@ class CmdVelSafety(object):
         # =====================================================================
         # Logic Variables
 
-        # default laser obstacles
-        self.laser_front_closest_point = [float("inf"), pi]
-        self.laser_rear_closest_point = [float("inf"), pi]
+        # default obstacles
         self.front_obstacles = list()
         self.rear_obstacles = list()
 
@@ -49,49 +47,24 @@ class CmdVelSafety(object):
         self.laser_front_base_dist = None
         self.laser_rear_base_dist = None
 
-        # clock
-        self.spin_rate = rospy.Rate(10)
-        self.laser_front_cb_rate = rospy.Rate(10)
-        self.laser_rear_cb_rate = rospy.Rate(10)
-
-        # last message
-        self.last_msg = Twist()
-        self.last_msg_time = rospy.Time.now()
-
-        # ????
-        self.prev_front_scan = [0.01] * 1500  # ojo con el size y con los nans/inf/max+1
-        self.prev_rear_scan = [0.01] * 500
-
         # robot cinematic parameters
         self.min_linear_velocity = abs(0.01)   # [m/s] The robot wont move if issued velocity is lesser than this.
         self.max_linear_velocity = abs(0.8)    # [m/s] Used to ignore too far obstacles. And to enforce velocity constraints. TODO
         self.max_angular_velocity = abs(0.8)   # [rad/s] Used to enforce velocity constraints. TODO
         self.linear_deacceleration = abs(0.3)  # m/s/s 0.3 is the nominal value for Pioneer 3AT
-        # self.linear_acceleration = abs(0.35)  # m/s/s
 
         # robot geometry
         self.robot_radius = 0.4
 
-        # sensor parameters
-        self.laser_range = pi / 9  # THIS CAN BE RETRIEVED FROM THE LaserScan Message!
-
         # misc
-        self.epsilon = 0.01
+        self.spin_rate = rospy.Rate(10)
         self.max_obstacle_range = 2.0  # ignore obstacles outside this radius
                                        # TODO: use other params to make sure this range is not too low.
-        # obs: la simulación puede ser evitada y agilizar los cómputos,
-        # computando una sección de toroide por donde se moverá el robot en
-        # ese tiempo y a la velocidad deseada.
-        self.simulation_time = 0.5
-        self.simulation_dt = 0.1
 
         # Subscriber variables
         self.curr_vel = Twist()
-        self.sent_vel = Twist()
-        self.sent_linear_vel = 0
-        self.sent_angular_vel = 0
-        self.cnt_front = 0
-        self.cnt_rear = 0
+        self.cmd_vel = Twist()
+        self.last_cmd_time = rospy.Time.now()
 
         # =====================================================================
         # Setup ROS Interface
@@ -215,9 +188,8 @@ class CmdVelSafety(object):
         self.curr_vel = msg.twist.twist
 
     def velocity_input_cb(self, msg):
-        self.sent_vel = msg
-        self.sent_linear_vel = msg.linear.x
-        self.sent_angular_vel = msg.angular.z
+        self.last_cmd_time = rospy.Time.now()
+        self.cmd_vel = msg
 
     # =========================================================================
     # Aux methods
@@ -303,7 +275,7 @@ class CmdVelSafety(object):
         try:
             # --- movement properties ---
             curr_direction = self.get_linear_movement_direction(self.curr_vel)
-            req_direction = self.get_linear_movement_direction(self.sent_vel)
+            req_direction = self.get_linear_movement_direction(self.cmd_vel)
             inflated_radius = self.get_inflated_radius()
 
             # -- separate obstacles into useful categories --
@@ -331,13 +303,21 @@ class CmdVelSafety(object):
                 + "\n  - requested: %s." % ("FORWARD" if req_direction > 0 else ("BACKWARDS" if req_direction < 0 else "STOPPED"))
                 + "\n> Linear velocities:"
                 + "\n  - current : %.2f[m/s]." % (self.curr_vel.linear.x)
-                + "\n  - required: %.2f[m/s]." % (self.sent_linear_vel)
+                + "\n  - required: %.2f[m/s]." % (self.cmd_vel.linear.x)
                 + "\n> There are %d relevant obstacles." % (len(inscribed_obstacles) + len(dangerous_obstacles) + len(potential_obstacles))
                 + "\n  - %3d inscribed" % (len(inscribed_obstacles))
                 + "\n  - %3d dangerous" % (len(dangerous_obstacles))
                 + "\n  - %3d potential" % (len(potential_obstacles))
                 + "\n  - %3d ignored" % (remaining_obstacles)
             )
+
+            if inscribed_obstacles:
+                # TODO: Sólo permitir velocidades de escape!
+                rospy.logerr_throttle(
+                    0.5,
+                    "There are inscribed obstacles!. Move the base with caution!"
+                    + "\n At the moment, there is no safety behavior implemented for this!."
+                )
 
             is_required_cmd_obsolete = False
             if is_required_cmd_obsolete:
@@ -359,7 +339,7 @@ class CmdVelSafety(object):
                     )
                 else:
                     # The velocity command is safe... send it!
-                    self.send_velocity(self.sent_vel)
+                    self.send_velocity(self.cmd_vel)
 
             # visualization
             self.visualize_markers(inflated_radius, inscribed_obstacles, dangerous_obstacles, potential_obstacles)
@@ -380,6 +360,10 @@ class CmdVelSafety(object):
         self.safety_pub.publish(Empty())
 
     def send_velocity(self, cmd):
+        cmd.linear.x = min(cmd.linear.x, self.max_linear_velocity)
+        cmd.linear.x = max(cmd.linear.x, -self.max_linear_velocity)
+        cmd.angular.x = min(cmd.angular.x, self.max_angular_velocity)
+        cmd.angular.x = max(cmd.angular.x, -self.max_angular_velocity)
         self.vel_pub.publish(cmd)
 
     # =========================================================================
