@@ -26,21 +26,29 @@ class CmdVelSafety(object):
 
     - Publishes a safe cmd_vel.
     - Publishes a marker to visualize dangerous outcomes on rviz.
+
+    To Do List:
+    ------------------------------
+    TODO: Manejar ruido de sensores ... moving average?
+    TODO: Considerar velocidad enviada o delta para computo de inflación
+    TODO: Manejo de curr_vel vs. cmd_vel cuando son parecidas. self.linear_acceleration = abs(0.35)  # m/s/s
+    TODO: Caso en que radio curvatura cae dentro del robot
+    TODO: Manejo de puntos ciegos ... que pasa si estaba previamente inscrito
+    TODO: Mutex para obstáculos y cmd_vel
+
+    Stalled:
+    ------------------------------
+    TODO: Use to max velocities to complement obstacle optimization
+    TODO: Evitar dejar pegado el nodo al intentar procesar demasiados obstáculos
+          no es necesario procesarlos todos, sólo basta encontrar uno que incomode
+    TODO: Evitar revisar obstáculos innecesarios, limitando el rango angular de los sensores
+          casos simples: forward veloz => no revisar rear.
+
+    Unsure:
+    ------------------------------
+    TODO: Reducir la velocidad en vez de dejarla en cero abruptamente
+    TODO: Use other params to make sure this range is not too low.
     """
-    # TODO: revisar para el caso en que radio curvatura caiga dentro del robot!
-    # TODO: considerar velocidad enviada o delta para  computo de inflación
-    # TODO: evitar dejar pegado el nodo al intentar procesar demasiados obstáculos!..
-    # .. no es necesario procesarlos todos, sólo basta encontrar uno que incomode
-    # TODO: Manejar ruido de sensores ... moving average?
-    # TODO: se puede evitar revisar obstáculos innecesarios, limitando el rango angular de los sensores
-    # TODO: manejo de puntos ciegos ... que pasa si estaba previamente inscrito
-    # TODO: manejo de curr_vel vs. cmd_vel cuando son parecidas. self.linear_acceleration = abs(0.35)  # m/s/s
-    # TODO: mutex para obstáculos y cmd_vel
-    # TODO: No considera cmd_vel en caso de que sea obsoleta.
-    # TODO: use other params to make sure this range is not too low.
-    # TODO: Use to max velocities to complement obstacle optimization
-    # UNSURE: do not process sensors when stopped?
-    # UNSURE: reducir la velocidad en vez de dejarla en cero abruptamente
 
     # COLORS
     COLOR_GREEN = ColorRGBA(r=0.0, g=1.0, b=0.0, a=0.5)
@@ -69,25 +77,28 @@ class CmdVelSafety(object):
 
         # robot geometry
         self.robot_radius = rospy.get_param("~robot_radius", 0.4)
+        self.base_frame = rospy.get_param("~base_link", "/bender/base_link")
+        self.laser_front_frame = rospy.get_param("~laser_front_link", "/bender/sensors/laser_front_link")
+        self.laser_rear_frame = rospy.get_param("~laser_rear_link", "/bender/sensors/laser_rear_link")
 
         # misc
-        self.is_debug_enabled = rospy.get_param("~is_debug_enabled", False)
         control_rate = rospy.get_param("~control_rate", 10)
-        self.spin_rate = rospy.Rate(control_rate)
+        odom_timeout = rospy.get_param("~odom_timeout", 0.5)
+        cmd_timeout = rospy.get_param("~cmd_timeout", 0.5)
+        self.is_debug_enabled = rospy.get_param("~is_debug_enabled", False)
         self.max_obstacle_range = rospy.get_param("~max_obstacle_range", 2.0)
+        self.odom_timeout = rospy.Duration.from_sec(odom_timeout)
+        self.cmd_timeout = rospy.Duration.from_sec(cmd_timeout)
+        self.spin_rate = rospy.Rate(control_rate)
 
         # Subscriber variables
         self.curr_vel = Twist()
         self.cmd_vel = Twist()
+        self.last_odom_time = rospy.Time.now()
         self.last_cmd_time = rospy.Time.now()
 
         # =====================================================================
-        # Setup ROS Interface
-
-        #  Parameter Server
-        self.laser_front_frame = rospy.get_param("~laser_front_link", "/bender/sensors/laser_front_link")
-        self.laser_rear_frame = rospy.get_param("~laser_rear_link", "/bender/sensors/laser_rear_link")
-        self.base_frame = rospy.get_param("~base_link", "/bender/base_link")
+        # ROS Interface
 
         # Service Clients
         self.tf_client = rospy.ServiceProxy("/bender/tf/simple_pose_transformer/transform", Transformer)
@@ -198,6 +209,7 @@ class CmdVelSafety(object):
         self.rear_obstacles = self.laser_scan_to_obstacles(msg, self.laser_rear_base_dist, pi)
 
     def odom_input_cb(self, msg):
+        self.last_odom_time = msg.header.stamp
         self.curr_vel = msg.twist.twist
 
     def velocity_input_cb(self, msg):
@@ -275,14 +287,10 @@ class CmdVelSafety(object):
             return -1
         return 0
 
-    def attempts_to_move(self):
-        vx = abs(self.curr_vel.linear.x)
-        va = abs(self.curr_vel.angular.z)
-
-        wx = abs(self.cmd_vel.linear.x)
-        wa = abs(self.cmd_vel.angular.z)
-        if (vx > self.min_linear_velocity or wx > self.min_linear_velocity
-           or va > self.min_angular_velocity or wa > self.min_angular_velocity):
+    def attempts_to_move(self, cmd_vel):
+        vx = abs(cmd_vel.linear.x)
+        va = abs(cmd_vel.angular.z)
+        if (vx > self.min_linear_velocity or va > self.min_angular_velocity):
             return True
         return False
 
@@ -370,6 +378,11 @@ class CmdVelSafety(object):
             real.append(obstacle)
         return real, dangerous, candidates
 
+    def is_something_obsolete(self, now, last, timeout):
+        if (now - last) > timeout:
+            return True
+        return False
+
     # =========================================================================
     # Main Processing method
     # =========================================================================
@@ -377,8 +390,21 @@ class CmdVelSafety(object):
     def spin_once(self):
 
         try:
+            now = rospy.Time.now()
+            is_odom_obsolete = self.is_something_obsolete(now, self.last_odom_time, self.odom_timeout)
+            is_cmd_obsolete = self.is_something_obsolete(now, self.last_cmd_time, self.cmd_timeout)
+            is_moving = (not is_cmd_obsolete) and self.attempts_to_move(self.curr_vel)
+            wants_to_move = (not is_odom_obsolete) and self.attempts_to_move(self.cmd_vel)
+
+            # odometry is obsolete
+            if is_odom_obsolete:
+                self.send_velocity(Twist())
+                rospy.logwarn_throttle(5.0, "Robot odometry is obsolete. Won't move.")
+                self.spin_rate.sleep()
+                return
+
             # --- velocity is too small to move ---
-            if not self.attempts_to_move():
+            if not is_moving and not wants_to_move:
                 # stop the robot... just in case. enforce
                 self.send_velocity(Twist())
                 rospy.loginfo_throttle(5.0, "Robot is stopped and no command has been issued. Enforcing stop state. This is just informative.")
@@ -391,7 +417,7 @@ class CmdVelSafety(object):
             req_linear_orientation = self.get_linear_movement_orientation(self.cmd_vel)
             req_angular_orientation = self.get_angular_movement_orientation(self.cmd_vel)
             cmd_vel = self.curr_vel
-            if curr_linear_orientation == 0 and curr_angular_orientation == 0:
+            if not is_moving:
                 # robot is stopped => use cmd_vel
                 cmd_vel = self.cmd_vel
             # TODO: analyze this:
