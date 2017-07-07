@@ -4,8 +4,7 @@ __author__ = 'Diego Baño, Matías Pavez'
 __email__ = 'diego.bano@ug.uchile.cl, matias.pavez@ing.uchile.cl'
 
 import rospy
-from math import sin, cos, atan2, pi, sqrt, pow as mpow, isnan
-import numpy
+from math import sin, cos, atan2, pi, sqrt, pow as mpow
 import tf
 
 from std_msgs.msg import Empty, ColorRGBA
@@ -28,6 +27,21 @@ class CmdVelSafety(object):
     - Publishes a safe cmd_vel.
     - Publishes a marker to visualize dangerous outcomes on rviz.
     """
+    # TODO: revisar para el caso en que radio curvatura caiga dentro del robot!
+    # TODO: considerar velocidad enviada o delta para  computo de inflación
+    # TODO: evitar dejar pegado el nodo al intentar procesar demasiados obstáculos!..
+    # .. no es necesario procesarlos todos, sólo basta encontrar uno que incomode
+    # TODO: Manejar ruido de sensores ... moving average?
+    # TODO: se puede evitar revisar obstáculos innecesarios, limitando el rango angular de los sensores
+    # TODO: manejo de puntos ciegos ... que pasa si estaba previamente inscrito
+    # TODO: manejo de curr_vel vs. cmd_vel cuando son parecidas. self.linear_acceleration = abs(0.35)  # m/s/s
+    # TODO: ROS Parameter Server
+    # TODO: mutex para obstáculos y cmd_vel
+    # TODO: No considera cmd_vel en caso de que sea obsoleta.
+    # TODO: use other params to make sure this range is not too low.
+    # TODO: Use to max velocities to complement obstacle optimization
+    # UNSURE: do not process sensors when stopped?
+    # UNSURE: reducir la velocidad en vez de dejarla en cero abruptamente
 
     # COLORS
     COLOR_GREEN = ColorRGBA(r=0.0, g=1.0, b=0.0, a=0.5)
@@ -48,10 +62,10 @@ class CmdVelSafety(object):
         self.laser_rear_base_dist = None
 
         # robot cinematic parameters
-        self.min_linear_velocity = abs(0.01)   # [m/s] The robot wont move if issued velocity is lesser than this.
-        self.min_angular_velocity = abs(0.01)  # [m/s] The robot wont move if issued velocity is lesser than this.
-        self.max_linear_velocity = abs(0.8)    # [m/s] Used to ignore too far obstacles. And to enforce velocity constraints. TODO
-        self.max_angular_velocity = abs(0.8)   # [rad/s] Used to enforce velocity constraints. TODO
+        self.min_linear_velocity = abs(0.01)   # [m/s] The robot is considered to be stopped if issued velocity is lesser than this.
+        self.min_angular_velocity = abs(0.01)  # [m/s] The robot is considered to be stopped if issued velocity is lesser than this.
+        self.max_linear_velocity = abs(0.8)    # [m/s] Used to enforce velocity constraints.
+        self.max_angular_velocity = abs(0.8)   # [rad/s] Used to enforce velocity constraints.
         self.linear_deacceleration = abs(0.3)  # m/s/s 0.3 is the nominal value for Pioneer 3AT
 
         # robot geometry
@@ -61,7 +75,6 @@ class CmdVelSafety(object):
         self.epsilon = 0.01
         self.spin_rate = rospy.Rate(10)
         self.max_obstacle_range = 2.0  # ignore obstacles outside this radius
-                                       # TODO: use other params to make sure this range is not too low.
 
         # Subscriber variables
         self.curr_vel = Twist()
@@ -155,9 +168,10 @@ class CmdVelSafety(object):
 
     def laser_scan_to_obstacles(self, msg, laser_distance, rotation=0.0):
         obstacles = list()
+        max_distance = self.max_obstacle_range + laser_distance
         theta_ = msg.angle_min
         for r in msg.ranges:
-            if r < self.max_obstacle_range + laser_distance:
+            if r < max_distance:
                 """
                 a first filter, deletes points before transformation to base frame
                 the filter is: r < max_obstacle_range + distance(base, laser)
@@ -172,9 +186,6 @@ class CmdVelSafety(object):
                 theta = atan2(dy, dx)
 
                 if d < self.max_obstacle_range:
-                    """
-                    real filter
-                    """
                     obstacles.append((d, theta + rotation))
 
             theta_ += msg.angle_increment
@@ -197,7 +208,7 @@ class CmdVelSafety(object):
     # Aux methods
     # =========================================================================
 
-    def get_inflated_radius(self):
+    def get_inflated_radius(self, cmd_vel):
         """
         Computes an inflated footprint for linear movements.
 
@@ -222,17 +233,17 @@ class CmdVelSafety(object):
             float: inflated radius.
         """
         inflated = 0.0
-        linear_vel = abs(self.curr_vel.linear.x)
+        linear_vel = abs(cmd_vel.linear.x)
         if linear_vel > self.min_linear_velocity:
             a = mpow(linear_vel, 2)
             b = (2.0 * self.linear_deacceleration)
             inflated = a / b
         return self.robot_radius + inflated
 
-    def get_curvature_radius(self):
-        if abs(self.curr_vel.angular.z) < self.epsilon:
+    def get_curvature_radius(self, cmd_vel):
+        if abs(cmd_vel.angular.z) < self.epsilon:
             return 0
-        return abs(self.curr_vel.linear.x / self.curr_vel.angular.z)
+        return abs(cmd_vel.linear.x / cmd_vel.angular.z)
 
     def get_linear_movement_orientation(self, cmd_vel):
         """
@@ -264,29 +275,94 @@ class CmdVelSafety(object):
             return -1
         return 0
 
-    def is_the_obstacle_in_front(self, obstacle_angle):
-        """
-        Returns:
-            >  True, if the obstacle in front of the robot
-            >  False if the obstacle is behind the robot
+    def attempts_to_move(self):
+        vx = abs(self.curr_vel.linear.x)
+        va = abs(self.curr_vel.angular.z)
 
-        Args:
-            obstacle_angle (float): Angle position of the closest obstacle
-        """
-        if cos(obstacle_angle) > 0:
+        wx = abs(self.cmd_vel.linear.x)
+        wa = abs(self.cmd_vel.angular.z)
+        if (vx > self.min_linear_velocity or wx > self.min_linear_velocity
+           or va > self.min_angular_velocity or wa > self.min_angular_velocity):
             return True
         return False
 
-    def predict_movement(self, cmd_vel, dt):
-        return Point()
-
-    def is_point_inside_circle(self, center, radius, point):
+    def is_point_inside_circle(self, r, x0, y0, x, y):
+        dx = (x - x0)
+        dy = (y - y0)
+        if dx * dx + dy * dy <= r * r:
+            return True
         return False
 
-    def simulate_movement(self, cmd_vel, obstacles):
+    def get_obstacle_in_toroid_section(self, obstacles, inflated_radius, curvature_radius, linear_orientation, angular_orientation):
         """
+        returns a list of inscribed obstacles on the toroid section
+        it depends on the current robot heading.
+
+        this assumes the obstacles are already filtered to be at at most
+        rm meters away
         """
-        return False
+        real = list()
+        dangerous = list()
+        candidates = list()
+        if not obstacles:
+            return real, dangerous, candidates
+
+        # compute small and big toroid circle params
+        rm = curvature_radius
+        r1 = curvature_radius - self.robot_radius
+        r2 = curvature_radius + self.robot_radius
+        x0 = 0
+        y0 = linear_orientation * angular_orientation * rm
+
+        # check obstacles
+        for obstacle in obstacles:
+            d = obstacle[0]
+
+            # avoid computation
+            if d > self.max_obstacle_range:
+                continue
+
+            # only consider inscribed obstacles
+            if d > inflated_radius:
+                candidates.append(obstacle)
+                continue
+
+            theta = obstacle[1]
+            x = d * cos(theta)
+            y = d * sin(theta)
+
+            # only forward/backward movement
+            if curvature_radius == 0.0:
+                # obstacle must be on the correct side
+                if x * linear_orientation < 0:
+                    dangerous.append(obstacle)
+                    continue
+
+                # obstacle inside the rectangle
+                if abs(y) > self.robot_radius:
+                    dangerous.append(obstacle)
+                    continue
+
+                # at this point, the obstacle is inside a rectangle
+                real.append(obstacle)
+                continue
+
+            # only process obstacles on the required quadrant
+            if x * linear_orientation < 0:
+                dangerous.append(obstacle)
+                continue
+
+            # obstacle must be outside the small circle
+            if self.is_point_inside_circle(r1, x0, y0, x, y):
+                dangerous.append(obstacle)
+                continue
+
+            # obstacle must be inside the big circle
+            if not self.is_point_inside_circle(r2, x0, y0, x, y):
+                dangerous.append(obstacle)
+                continue
+            real.append(obstacle)
+        return real, dangerous, candidates
 
     # =========================================================================
     # Main Processing method
@@ -295,72 +371,60 @@ class CmdVelSafety(object):
     def spin_once(self):
 
         try:
+            if not self.attempts_to_move():
+                # stop the robot... just in case. enforce
+                self.send_velocity(Twist())
+                rospy.loginfo_throttle(5.0, "Robot is stopped and no command has been issued. Enforcing stop state. This is just informative.")
+                self.spin_rate.sleep()
+                return
+
             # --- movement properties ---
             curr_linear_orientation = self.get_linear_movement_orientation(self.curr_vel)
             curr_angular_orientation = self.get_angular_movement_orientation(self.curr_vel)
             req_direction = self.get_linear_movement_orientation(self.cmd_vel)
-            inflated_radius = self.get_inflated_radius()
-            curvature_radius = self.get_curvature_radius()
+            inflated_radius = self.get_inflated_radius(self.curr_vel)
+            curvature_radius = self.get_curvature_radius(self.curr_vel)
 
             # -- separate obstacles into useful categories --
             # lists of tuples (distance, angle) to obstacles
             obstacles = self.front_obstacles + self.rear_obstacles
-            inscribed_obstacles = list()  # inside robot radius
-            dangerous_obstacles = list()  # inside inflated radius but not inscribed
-            potential_obstacles = list()  # inside max_obstacle_range radius but neither inflated nor inscribed
-            remaining_obstacles = 0
-            for obstacle in obstacles:
-                d = obstacle[0]
-                if d <= self.robot_radius:
-                    inscribed_obstacles.append(obstacle)
-                elif d <= inflated_radius:
-                    dangerous_obstacles.append(obstacle)
-                elif d <= self.max_obstacle_range:
-                    potential_obstacles.append(obstacle)
-                else:
-                    remaining_obstacles += 1
+
+            # get real obstacles vs. not really obstacles.
+            real_obstacles, dangerous_obstacles, candidate_obstacles = self.get_obstacle_in_toroid_section(
+                obstacles,
+                inflated_radius, curvature_radius,
+                curr_linear_orientation, curr_angular_orientation
+            )
+            remaining_obstacles = len(obstacles) - len(real_obstacles) - len(dangerous_obstacles) - len(candidate_obstacles)
 
             rospy.loginfo_throttle(
                 1.0, ""
+                + "\n> Movement properties:"
+                + "\n  - inflated_radius: %.2f [m]." % (inflated_radius)
+                + "\n  - curvature_radius: %.2f [m]." % (curvature_radius)
                 + "\n> Movement direction:"
                 + "\n  - current  : %s." % ("FORWARD" if curr_linear_orientation > 0 else ("BACKWARDS" if curr_linear_orientation < 0 else "STOPPED"))
                 + "\n  - requested: %s." % ("FORWARD" if req_direction > 0 else ("BACKWARDS" if req_direction < 0 else "STOPPED"))
                 + "\n> Linear velocities:"
                 + "\n  - current : %.2f[m/s]." % (self.curr_vel.linear.x)
                 + "\n  - required: %.2f[m/s]." % (self.cmd_vel.linear.x)
-                + "\n> There are %d relevant obstacles." % (len(inscribed_obstacles) + len(dangerous_obstacles) + len(potential_obstacles))
-                + "\n  - %3d inscribed" % (len(inscribed_obstacles))
+                + "\n> There are %d relevant obstacles." % (len(real_obstacles) + len(dangerous_obstacles))
+                + "\n  - %3d real" % (len(real_obstacles))
                 + "\n  - %3d dangerous" % (len(dangerous_obstacles))
-                + "\n  - %3d potential" % (len(potential_obstacles))
+                + "\n  - %3d other" % (len(candidate_obstacles))
                 + "\n  - %3d ignored" % (remaining_obstacles)
             )
-
-            if inscribed_obstacles:
-                # TODO: Sólo permitir velocidades de escape!
-                rospy.logerr_throttle(
-                    0.5,
-                    "There are inscribed obstacles!. Move the base with caution!"
-                    + "\n At the moment, there is no safety behavior implemented for this!."
-                )
 
             is_required_cmd_obsolete = False
             if is_required_cmd_obsolete:
                 # just stop the robot... no signal required
                 self.send_velocity(Twist())
-                rospy.logwarn_throttle(
-                    5.0,
-                    "Required cmd vel is obsolete ... stopping the robot."
-                )
+                rospy.logwarn_throttle(5.0, "Required cmd vel is obsolete ... stopping the robot.")
             else:
-                # TODO: simulate movement
-                generates_collision = False
-
-                if generates_collision:
+                if real_obstacles:
                     # Send stop signals!
                     self.stop_motion()
-                    rospy.logwarn(
-                        "Dangerous cmd_vel wont be applied!"
-                    )
+                    rospy.logwarn_throttle(1.0, "Dangerous cmd_vel wont be applied!")
                 else:
                     # The velocity command is safe... send it!
                     self.send_velocity(self.cmd_vel)
@@ -371,16 +435,15 @@ class CmdVelSafety(object):
                 curvature_radius,
                 curr_linear_orientation,
                 curr_angular_orientation,
-                inscribed_obstacles,
+                real_obstacles,
                 dangerous_obstacles,
-                potential_obstacles
+                candidate_obstacles
             )
 
         except Exception as e:
             rospy.logerr("An error occurred. Sending stop cmd_vel to the base. Error description: %s" % e)
             self.stop_motion()
 
-        # self.visualize_markers(expanded_radius, closest, will_collide, could_collide)
         self.spin_rate.sleep()
 
     # =========================================================================
@@ -419,9 +482,18 @@ class CmdVelSafety(object):
         sections = 20
         r1 = curvature_radius - self.robot_radius
         r2 = curvature_radius + self.robot_radius
-        rm = curvature_radius
+
+        # only linear velocity
         if curvature_radius == 0.0:
+            dx = linear_orientation * inflated_radius / (sections - 1)
+            for i in range(sections):
+                marker.points.append(Point(x=i * dx, y=r1, z=0.05))
+                marker.points.append(Point(x=i * dx, y=r2, z=0.05))
+
             return marker
+
+        # mixed velocities
+        rm = curvature_radius
         max_theta = inflated_radius / rm  # [rad] simple proportional rule
         dtheta = max_theta / (sections - 1)
         x0 = 0
@@ -481,17 +553,14 @@ class CmdVelSafety(object):
             marker.points.append(Point(x=dx, y=dy, z=1.0))
         return marker
 
-    def visualize_markers(self,
-                          inflated_radius, curvature_radius,
-                          linear_orientation, angular_orientation,
-                          inscribed_obstacles, dangerous_obstacles, potential_obstacles):
+    def visualize_markers(self, inflated_radius, curvature_radius, linear_orientation, angular_orientation, real_obstacles, dangerous_obstacles, candidate_obstacles):
 
         msg = MarkerArray()
         now = rospy.get_rostime()
 
         # -- inflated_radius marker --
         marker_inflated_radius = self.genmarker_inflated_radius(now, inflated_radius)
-        if inscribed_obstacles:
+        if real_obstacles:
             marker_inflated_radius.color = CmdVelSafety.COLOR_RED
         elif dangerous_obstacles:
             marker_inflated_radius.color = CmdVelSafety.COLOR_ORANGE
@@ -500,9 +569,9 @@ class CmdVelSafety(object):
         msg.markers.append(marker_inflated_radius)
 
         # -- inscribed obstacles --
-        marker_inscribed_obstacles = self.genmarker_obstacles(now, inscribed_obstacles, CmdVelSafety.COLOR_RED)
-        marker_inscribed_obstacles.ns = "safety/inscribed_obstacles"
-        msg.markers.append(marker_inscribed_obstacles)
+        marker_real_obstacles = self.genmarker_obstacles(now, real_obstacles, CmdVelSafety.COLOR_RED)
+        marker_real_obstacles.ns = "safety/real_obstacles"
+        msg.markers.append(marker_real_obstacles)
 
         # -- dangerous obstacles --
         marker_dangerous_obstacles = self.genmarker_obstacles(now, dangerous_obstacles, CmdVelSafety.COLOR_ORANGE)
@@ -510,9 +579,9 @@ class CmdVelSafety(object):
         msg.markers.append(marker_dangerous_obstacles)
 
         # -- potential obstacles --
-        marker_potential_obstacles = self.genmarker_obstacles(now, potential_obstacles, CmdVelSafety.COLOR_GREEN)
-        marker_potential_obstacles.ns = "safety/potential_obstacles"
-        msg.markers.append(marker_potential_obstacles)
+        marker_candidate_obstacles = self.genmarker_obstacles(now, candidate_obstacles, CmdVelSafety.COLOR_GREEN)
+        marker_candidate_obstacles.ns = "safety/candidate_obstacles"
+        msg.markers.append(marker_candidate_obstacles)
 
         # -- toroid --
         marker_toroid = self.genmarker_toroid(now, inflated_radius, curvature_radius, linear_orientation, angular_orientation)
