@@ -4,7 +4,7 @@ __author__ = 'Diego Baño, Matías Pavez'
 __email__ = 'diego.bano@ug.uchile.cl, matias.pavez@ing.uchile.cl'
 
 import rospy
-from math import sin, cos, atan2, pi, sqrt, pow as mpow
+from math import sin, cos, atan2, pi, sqrt
 import tf
 
 from std_msgs.msg import Empty, ColorRGBA
@@ -72,6 +72,7 @@ class CmdVelSafety(object):
         self.robot_radius = 0.4
 
         # misc
+        self.is_debug_enabled = True
         self.epsilon = 0.01
         self.spin_rate = rospy.Rate(10)
         self.max_obstacle_range = 2.0  # ignore obstacles outside this radius
@@ -235,7 +236,7 @@ class CmdVelSafety(object):
         inflated = 0.0
         linear_vel = abs(cmd_vel.linear.x)
         if linear_vel > self.min_linear_velocity:
-            a = mpow(linear_vel, 2)
+            a = linear_vel * linear_vel
             b = (2.0 * self.linear_deacceleration)
             inflated = a / b
         return self.robot_radius + inflated
@@ -304,7 +305,13 @@ class CmdVelSafety(object):
         real = list()
         dangerous = list()
         candidates = list()
+
+        # no obstacles to proccess
         if not obstacles:
+            return real, dangerous, candidates
+
+        # no movement => no obstacle
+        if linear_orientation == 0 and angular_orientation == 0:
             return real, dangerous, candidates
 
         # compute small and big toroid circle params
@@ -371,6 +378,7 @@ class CmdVelSafety(object):
     def spin_once(self):
 
         try:
+            # --- velocity is too small to move ---
             if not self.attempts_to_move():
                 # stop the robot... just in case. enforce
                 self.send_velocity(Twist())
@@ -378,12 +386,30 @@ class CmdVelSafety(object):
                 self.spin_rate.sleep()
                 return
 
-            # --- movement properties ---
+            # --- select target velocity ---
             curr_linear_orientation = self.get_linear_movement_orientation(self.curr_vel)
             curr_angular_orientation = self.get_angular_movement_orientation(self.curr_vel)
-            req_direction = self.get_linear_movement_orientation(self.cmd_vel)
-            inflated_radius = self.get_inflated_radius(self.curr_vel)
-            curvature_radius = self.get_curvature_radius(self.curr_vel)
+            req_linear_orientation = self.get_linear_movement_orientation(self.cmd_vel)
+            req_angular_orientation = self.get_angular_movement_orientation(self.cmd_vel)
+            cmd_vel = self.curr_vel
+            if curr_linear_orientation == 0 and curr_angular_orientation == 0:
+                # robot is stopped => use cmd_vel
+                cmd_vel = self.cmd_vel
+            # TODO: analyze this:
+            # else:
+            #     # increment/decrement velocity by acceleration
+            #     cmd_vel = ...
+
+            # --- movement properties ---
+            linear_orientation = self.get_linear_movement_orientation(cmd_vel)
+            angular_orientation = self.get_angular_movement_orientation(cmd_vel)
+            inflated_radius = self.get_inflated_radius(cmd_vel)
+            curvature_radius = self.get_curvature_radius(cmd_vel)
+            # if linear_orientation == 0 and angular_orientation == 0:
+            #     # the required velocity is too small, because of a in(de)crement
+            #     self.send_velocity(Twist())
+            #     self.spin_rate.sleep()
+            #     return
 
             # -- separate obstacles into useful categories --
             # lists of tuples (distance, angle) to obstacles
@@ -393,27 +419,36 @@ class CmdVelSafety(object):
             real_obstacles, dangerous_obstacles, candidate_obstacles = self.get_obstacle_in_toroid_section(
                 obstacles,
                 inflated_radius, curvature_radius,
-                curr_linear_orientation, curr_angular_orientation
+                linear_orientation, angular_orientation
             )
-            remaining_obstacles = len(obstacles) - len(real_obstacles) - len(dangerous_obstacles) - len(candidate_obstacles)
 
-            rospy.loginfo_throttle(
-                1.0, ""
-                + "\n> Movement properties:"
-                + "\n  - inflated_radius: %.2f [m]." % (inflated_radius)
-                + "\n  - curvature_radius: %.2f [m]." % (curvature_radius)
-                + "\n> Movement direction:"
-                + "\n  - current  : %s." % ("FORWARD" if curr_linear_orientation > 0 else ("BACKWARDS" if curr_linear_orientation < 0 else "STOPPED"))
-                + "\n  - requested: %s." % ("FORWARD" if req_direction > 0 else ("BACKWARDS" if req_direction < 0 else "STOPPED"))
-                + "\n> Linear velocities:"
-                + "\n  - current : %.2f[m/s]." % (self.curr_vel.linear.x)
-                + "\n  - required: %.2f[m/s]." % (self.cmd_vel.linear.x)
-                + "\n> There are %d relevant obstacles." % (len(real_obstacles) + len(dangerous_obstacles))
-                + "\n  - %3d real" % (len(real_obstacles))
-                + "\n  - %3d dangerous" % (len(dangerous_obstacles))
-                + "\n  - %3d other" % (len(candidate_obstacles))
-                + "\n  - %3d ignored" % (remaining_obstacles)
-            )
+            # -- just for debugging --
+            if self.is_debug_enabled:
+                remaining_obstacles = len(obstacles) - len(real_obstacles) - len(dangerous_obstacles) - len(candidate_obstacles)
+
+                def linear_to_string(x):
+                    return ("FORWARD" if x > 0 else ("BACKWARDS" if x < 0 else "NOT LINEAR"))
+
+                def angular_to_string(a):
+                    return ("CLOCKWISE" if a > 0 else ("COUNTER CLOCKWISE" if a < 0 else "NOT ANGULAR"))
+
+                rospy.loginfo_throttle(
+                    1.0, ""
+                    + "\n> Movement properties:"
+                    + "\n  - inflated_radius: %.2f [m]." % (inflated_radius)
+                    + "\n  - curvature_radius: %.2f [m]." % (curvature_radius)
+                    + "\n> Movement direction:"
+                    + "\n  - current  : %s, %s" % (linear_to_string(curr_linear_orientation), angular_to_string(curr_angular_orientation))
+                    + "\n  - requested: %s, %s" % (linear_to_string(req_linear_orientation), angular_to_string(req_angular_orientation))
+                    + "\n> Velocities:"
+                    + "\n  - current : %.2f[m/s], %.2f[rad/s]" % (self.curr_vel.linear.x, self.curr_vel.angular.z)
+                    + "\n  - required: %.2f[m/s], %.2f[rad/s]." % (self.cmd_vel.linear.x, self.cmd_vel.angular.z)
+                    + "\n> There are %d relevant obstacles." % (len(real_obstacles) + len(dangerous_obstacles))
+                    + "\n  - %3d real" % (len(real_obstacles))
+                    + "\n  - %3d dangerous" % (len(dangerous_obstacles))
+                    + "\n  - %3d other" % (len(candidate_obstacles))
+                    + "\n  - %3d ignored" % (remaining_obstacles)
+                )
 
             is_required_cmd_obsolete = False
             if is_required_cmd_obsolete:
@@ -433,8 +468,8 @@ class CmdVelSafety(object):
             self.visualize_markers(
                 inflated_radius,
                 curvature_radius,
-                curr_linear_orientation,
-                curr_angular_orientation,
+                linear_orientation,
+                angular_orientation,
                 real_obstacles,
                 dangerous_obstacles,
                 candidate_obstacles
