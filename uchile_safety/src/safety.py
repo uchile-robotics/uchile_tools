@@ -27,7 +27,6 @@ class CmdVelSafety(object):
     - Publishes a safe cmd_vel.
     - Publishes a marker to visualize dangerous outcomes on rviz.
     """
-    # TODO: ROS namespaces
     # TODO: revisar para el caso en que radio curvatura caiga dentro del robot!
     # TODO: considerar velocidad enviada o delta para  computo de inflación
     # TODO: evitar dejar pegado el nodo al intentar procesar demasiados obstáculos!..
@@ -36,7 +35,6 @@ class CmdVelSafety(object):
     # TODO: se puede evitar revisar obstáculos innecesarios, limitando el rango angular de los sensores
     # TODO: manejo de puntos ciegos ... que pasa si estaba previamente inscrito
     # TODO: manejo de curr_vel vs. cmd_vel cuando son parecidas. self.linear_acceleration = abs(0.35)  # m/s/s
-    # TODO: ROS Parameter Server
     # TODO: mutex para obstáculos y cmd_vel
     # TODO: No considera cmd_vel en caso de que sea obsoleta.
     # TODO: use other params to make sure this range is not too low.
@@ -63,20 +61,20 @@ class CmdVelSafety(object):
         self.laser_rear_base_dist = None
 
         # robot cinematic parameters
-        self.min_linear_velocity = abs(0.01)   # [m/s] The robot is considered to be stopped if issued velocity is lesser than this.
-        self.min_angular_velocity = abs(0.01)  # [m/s] The robot is considered to be stopped if issued velocity is lesser than this.
-        self.max_linear_velocity = abs(0.8)    # [m/s] Used to enforce velocity constraints.
-        self.max_angular_velocity = abs(0.8)   # [rad/s] Used to enforce velocity constraints.
-        self.linear_deacceleration = abs(0.3)  # m/s/s 0.3 is the nominal value for Pioneer 3AT
+        self.min_linear_velocity = rospy.get_param("~min_linear_velocity", 0.01)
+        self.max_linear_velocity = rospy.get_param("~max_linear_velocity", 0.8)
+        self.min_angular_velocity = rospy.get_param("~min_angular_velocity", 0.01)
+        self.max_angular_velocity = rospy.get_param("~max_angular_velocity", 0.8)
+        self.linear_deacceleration = rospy.get_param("~linear_deacceleration", 0.3)
 
         # robot geometry
-        self.robot_radius = 0.4
+        self.robot_radius = rospy.get_param("~robot_radius", 0.4)
 
         # misc
-        self.is_debug_enabled = True
-        self.epsilon = 0.01
-        self.spin_rate = rospy.Rate(10)
-        self.max_obstacle_range = 2.0  # ignore obstacles outside this radius
+        self.is_debug_enabled = rospy.get_param("~is_debug_enabled", False)
+        control_rate = rospy.get_param("~control_rate", 10)
+        self.spin_rate = rospy.Rate(control_rate)
+        self.max_obstacle_range = rospy.get_param("~max_obstacle_range", 2.0)
 
         # Subscriber variables
         self.curr_vel = Twist()
@@ -87,9 +85,9 @@ class CmdVelSafety(object):
         # Setup ROS Interface
 
         #  Parameter Server
-        self.laser_front_frame = rospy.get_param("laser_front_link", "/bender/sensors/laser_front_link")
-        self.laser_rear_frame = rospy.get_param("laser_rear_link", "/bender/sensors/laser_rear_link")
-        self.base_frame = rospy.get_param("base_link", "/bender/base_link")
+        self.laser_front_frame = rospy.get_param("~laser_front_link", "/bender/sensors/laser_front_link")
+        self.laser_rear_frame = rospy.get_param("~laser_rear_link", "/bender/sensors/laser_rear_link")
+        self.base_frame = rospy.get_param("~base_link", "/bender/base_link")
 
         # Service Clients
         self.tf_client = rospy.ServiceProxy("/bender/tf/simple_pose_transformer/transform", Transformer)
@@ -101,19 +99,19 @@ class CmdVelSafety(object):
         self.odom_sub = None
 
         # Topic Publishers
-        self.vel_pub = rospy.Publisher('/bender/nav/safety/cmd_vel', Twist, queue_size=2)
-        self.marker_pub = rospy.Publisher("/bender/nav/safety/markers", MarkerArray, queue_size=1)
-        self.safety_pub = rospy.Publisher("/bender/nav/low_level_mux/obstacle", Empty, queue_size=1)  # enma
+        self.vel_pub = rospy.Publisher("~output", Twist, queue_size=2)
+        self.marker_pub = rospy.Publisher("~markers", MarkerArray, queue_size=1)
+        self.stop_triggered_pub = rospy.Publisher("~triggered", Empty, queue_size=1)
 
     # =========================================================================
     # Setup Methods
     # =========================================================================
 
     def _setup_subscribers(self):
-        self.laser_front_sub = rospy.Subscriber('/bender/sensors/laser_front/scan_filtered', LaserScan, self.laser_front_input_cb_v2, queue_size=1)
-        self.laser_rear_sub = rospy.Subscriber('/bender/sensors/laser_rear/scan', LaserScan, self.laser_rear_input_cb_v2, queue_size=1)
-        self.vel_sub = rospy.Subscriber("/bender/nav/mux/cmd_vel", Twist, self.velocity_input_cb, queue_size=1)
-        self.odom_sub = rospy.Subscriber("/bender/nav/odom", Odometry, self.odom_input_cb, queue_size=1)
+        self.laser_front_sub = rospy.Subscriber('~scan_front', LaserScan, self.laser_front_input_cb_v2, queue_size=1)
+        self.laser_rear_sub = rospy.Subscriber('~scan_rear', LaserScan, self.laser_rear_input_cb_v2, queue_size=1)
+        self.vel_sub = rospy.Subscriber("~input", Twist, self.velocity_input_cb, queue_size=1)
+        self.odom_sub = rospy.Subscriber("~odom", Odometry, self.odom_input_cb, queue_size=1)
 
     def get_laser_to_base_transform(self, dist, ang, input_frame, target_frame):
         """
@@ -243,7 +241,7 @@ class CmdVelSafety(object):
         return self.robot_radius + inflated
 
     def get_curvature_radius(self, cmd_vel):
-        if abs(cmd_vel.angular.z) < self.epsilon:
+        if abs(cmd_vel.angular.z) < self.min_angular_velocity:
             return 0
         return abs(cmd_vel.linear.x / cmd_vel.angular.z)
 
@@ -488,7 +486,7 @@ class CmdVelSafety(object):
 
     def stop_motion(self):
         self.send_velocity(Twist())
-        self.safety_pub.publish(Empty())
+        self.stop_triggered_pub.publish(Empty())
 
     def send_velocity(self, cmd):
         cmd.linear.x = min(cmd.linear.x, self.max_linear_velocity)

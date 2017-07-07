@@ -1,4 +1,18 @@
 
-laser_front_link: /bender/sensors/laser_front_link
-laser_rear_link: /bender/sensors/laser_rear_link
-base_link: /bender/base_link
+# robot cinematic parameters
+min_linear_velocity  : 0.01  # [m/s]  . > 0. The robot is considered to be stopped if issued velocity is lesser than this.
+min_angular_velocity : 0.01  # [m/s]  . > 0. The robot is considered to be stopped if issued velocity is lesser than this.
+max_linear_velocity  : 0.80  # [m/s]  . > 0. Used to enforce velocity constraints.
+max_angular_velocity : 0.80  # [rad/s]. > 0. Used to enforce velocity constraints.
+linear_deacceleration: 0.30  # [m/s/s]. > 0. 0.3 is the nominal value for Pioneer 3AT
+
+# robot geometry
+robot_radius     : 0.40 # [m]. This is the minimum inflation radius.
+laser_front_frame: "/bender/sensors/laser_front_link"
+laser_rear_frame : "/bender/sensors/laser_rear_link"
+base_frame       : "/bender/base_link"
+
+# misc
+is_debug_enabled  : false # prints debug information.
+control_rate      : 10    # [Hz]. Keep it above 5Hz, but consider the highest sensor rate is 20Hz.
+max_obstacle_range: 2.0   # [m] ignore obstacles outside this radius

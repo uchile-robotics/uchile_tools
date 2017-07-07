@@ -1,12 +1,22 @@
 <launch>
 
-	<arg name="asus_scan" default="false"/>
+	<node pkg="uchile_safety" type="safety.py" name="safety" ns="/bender/nav/" respawn="true" respawn_delay="2">
 
-	<group if="$(arg asus_scan)">
-		<include file="$(find uchile_perception_utils)/point_filters/pointcloud_to_laserscan/launch/pointcloud_to_laserscan.launch"/>
+	 	<rosparam command="load" file="$(find uchile_safety)/config/safety.yaml" />
 
-		<node pkg="uchile_safety" type="low_level_asus_safety_control.py" name="low_level_safety_control" respawn="true" respawn_delay="1"/>
-	</group>
+	 	<!-- odometry -->
+	 	<remap from="~odom"          to="/bender/nav/odom"/>
 
-	<node unless="$(arg asus_scan)" pkg="uchile_safety" type="low_level_safety_control.py" name="low_level_safety_control" respawn="true" respawn_delay="1"/>
+	 	<!-- input sensors -->
+	 	<remap from="~scan_front"    to="/bender/sensors/laser_front/scan_filtered"/>
+	 	<remap from="~scan_rear"     to="/bender/sensors/laser_rear/scan"/>
+
+	 	<!-- cmd_vel -->
+	 	<remap from="~input" to="/bender/nav/mux/cmd_vel"/>
+	 	<remap from="~output" to="~cmd_vel"/>
+
+	 	<!-- This remmap exists for the follow skill only -->
+	 	<remap from="~triggered" to="/bender/nav/low_level_mux/obstacle"/>
+	</node>
+
 </launch>
