@@ -27,6 +27,7 @@ class CmdVelSafety(object):
     - Publishes a safe cmd_vel.
     - Publishes a marker to visualize dangerous outcomes on rviz.
     """
+    # TODO: ROS namespaces
     # TODO: revisar para el caso en que radio curvatura caiga dentro del robot!
     # TODO: considerar velocidad enviada o delta para  computo de inflación
     # TODO: evitar dejar pegado el nodo al intentar procesar demasiados obstáculos!..
@@ -100,7 +101,7 @@ class CmdVelSafety(object):
         self.odom_sub = None
 
         # Topic Publishers
-        self.vel_pub = rospy.Publisher('/bender/nav/safety/low_level/cmd_vel', Twist, queue_size=2)
+        self.vel_pub = rospy.Publisher('/bender/nav/safety/cmd_vel', Twist, queue_size=2)
         self.marker_pub = rospy.Publisher("/bender/nav/safety/markers", MarkerArray, queue_size=1)
         self.safety_pub = rospy.Publisher("/bender/nav/low_level_mux/obstacle", Empty, queue_size=1)  # enma
 
@@ -111,7 +112,7 @@ class CmdVelSafety(object):
     def _setup_subscribers(self):
         self.laser_front_sub = rospy.Subscriber('/bender/sensors/laser_front/scan_filtered', LaserScan, self.laser_front_input_cb_v2, queue_size=1)
         self.laser_rear_sub = rospy.Subscriber('/bender/sensors/laser_rear/scan', LaserScan, self.laser_rear_input_cb_v2, queue_size=1)
-        self.vel_sub = rospy.Subscriber("/bender/nav/low_level_mux/cmd_vel", Twist, self.velocity_input_cb, queue_size=1)
+        self.vel_sub = rospy.Subscriber("/bender/nav/mux/cmd_vel", Twist, self.velocity_input_cb, queue_size=1)
         self.odom_sub = rospy.Subscriber("/bender/nav/odom", Odometry, self.odom_input_cb, queue_size=1)
 
     def get_laser_to_base_transform(self, dist, ang, input_frame, target_frame):

@@ -1,0 +1,42 @@
+# Configuration for subscribers to cmd_vel sources.
+# The mux chooses which topic to relay to the base.
+#
+# Important: This mux is the one which sends the commands to the base.
+#
+# Individual subscriber configuration:
+#   name:        Source name
+#   topic:       The topic that provides cmd_vel messages
+#   timeout:     Time in seconds without incoming messages to consider this topic inactive
+#   priority:    Priority: an UNIQUE unsigned integer from 0 (lowest) to MAX_INT
+#   short_desc:  Short description (optional)
+#
+# Developer notes: The separation into 2 mux is neccesary, because the safety layer operates over the 
+# multiplexed command from the "common" sources.
+
+subscribers:
+
+  - name: "Common Mux"
+    topic: "/bender/nav/mux/cmd_vel"
+    timeout: 1
+    priority: 1
+    short_desc: "Common mux messages. Just in case the safety layer takes too long to process commands!"
+
+  - name: "Safety Layer"
+    topic: "/bender/nav/safety/cmd_vel"
+    timeout: 1
+    priority: 2
+    short_desc: "Low level safety control, possible to override using the joystick"
+
+  - name: "High Priority Joystick"
+    topic: "/bender/joy/base/master_cmd_vel"
+    timeout: 5
+    priority: 3
+    short_desc: "User controlled commands, they have priority over the low level security layer assuming the user knows what they're doing"
+
+  - name: "Reactive Safety Layer (NOT IMPLEMENTED YET)"
+    topic: "/bender/nav/safety/master_cmd_vel"
+    timeout: 0.3
+    priority: 99
+    short_desc: "This layer should send reactive velocity commands to avoid obstacles provided by the bumper/cliff sensors."
+
+publisher: "/bender/nav/base/cmd_vel"
