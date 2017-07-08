@@ -71,19 +71,21 @@ class CmdVelSafety(object):
         self.angular_decel = rospy.get_param("~angular_decel", 1.74)
         self.angular_accel = rospy.get_param("~angular_accel", 1.74)
 
-        # robot geometry
-        robot_radius = rospy.get_param("~robot_radius", 0.4)
-        self.base_frame = rospy.get_param("~base_link", "/bender/base_link")
-        self.laser_front_frame = rospy.get_param("~laser_front_link", "/bender/sensors/laser_front_link")
-        self.laser_rear_frame = rospy.get_param("~laser_rear_link", "/bender/sensors/laser_rear_link")
+        # robot frames
+        self.base_frame = rospy.get_param("~base_frame", "/bender/base_link")
+        self.laser_front_frame = rospy.get_param("~laser_front_frame", "/bender/sensors/laser_front_link")
+        self.laser_rear_frame = rospy.get_param("~laser_rear_frame", "/bender/sensors/laser_rear_link")
+        self.laser_rgbd_frame = rospy.get_param("~laser_rgbd_frame", "/bender/sensors/laser_rear_link")
         self.laser_front_base_dist = None
         self.laser_rear_base_dist = None
+        self.laser_rgbd_base_dist = None
 
         # misc
         control_rate = rospy.get_param("~control_rate", 10)
         odom_timeout = rospy.get_param("~odom_timeout", 0.5)
         cmd_timeout = rospy.get_param("~cmd_timeout", 0.5)
         sim_lookahead_factor = rospy.get_param("~sim_lookahead_factor", 3.0)
+        robot_radius = rospy.get_param("~robot_radius", 0.4)
         min_distance_to_obstacles = rospy.get_param("~min_distance_to_obstacles", 0.1)
         self.min_inflation_radius = robot_radius + min_distance_to_obstacles
         self.sim_time = float(sim_lookahead_factor) / float(control_rate)
@@ -110,8 +112,10 @@ class CmdVelSafety(object):
         # sensor readings
         self.front_obstacles = list()
         self.rear_obstacles = list()
+        self.rgbd_obstacles = list()
         self.sensor_front_lock = Lock()
         self.sensor_rear_lock = Lock()
+        self.sensor_rgbd_lock = Lock()
 
         # =====================================================================
         # ROS Interface
@@ -122,6 +126,7 @@ class CmdVelSafety(object):
         # Topic Subscribers (avoid computing until setup is done)
         self.laser_front_sub = None
         self.laser_rear_sub = None
+        self.laser_rgbd_sub = None
         self.vel_sub = None
         self.odom_sub = None
 
@@ -137,6 +142,7 @@ class CmdVelSafety(object):
     def _setup_subscribers(self):
         self.laser_front_sub = rospy.Subscriber('~scan_front', LaserScan, self.laser_front_callback, queue_size=1)
         self.laser_rear_sub = rospy.Subscriber('~scan_rear', LaserScan, self.laser_rear_callback, queue_size=1)
+        self.laser_rgbd_sub = rospy.Subscriber('~scan_rgbd', LaserScan, self.laser_rgbd_callback, queue_size=1)
         self.vel_sub = rospy.Subscriber("~input", Twist, self.cmd_callback, queue_size=1)
         self.odom_sub = rospy.Subscriber("~odom", Odometry, self.odom_input_callback, queue_size=1)
 
@@ -177,15 +183,17 @@ class CmdVelSafety(object):
             try:
                 front_laser_pose = self.get_laser_to_base_transform(0, 0, self.laser_front_frame, self.base_frame)
                 rear_laser_pose = self.get_laser_to_base_transform(0, 0, self.laser_rear_frame, self.base_frame)
+                rgbd_laser_pose = self.get_laser_to_base_transform(0, 0, self.laser_rgbd_frame, self.base_frame)
                 self.laser_front_base_dist = _distance(front_laser_pose.pose.position, Point())
                 self.laser_rear_base_dist = _distance(rear_laser_pose.pose.position, Point())
+                self.laser_rgbd_base_dist = _distance(rgbd_laser_pose.pose.position, Point())
                 self._setup_subscribers()
                 return True
             except Exception as e:
                 rospy.logerr_throttle(
                     5.0,  # every 5 seconds
-                    "Safety layer cannot start yet: Could not transform pose from between laser ({} or {}) and base ({}) frames. Because {}."
-                    .format(self.laser_front_frame, self.laser_rear_frame, self.base_frame, e))
+                    "Safety layer cannot start yet: Could not transform pose from between lasers ({} or {} or {}) and base ({}) frames. Because {}."
+                    .format(self.laser_front_frame, self.laser_rear_frame, self.laser_rgbd_frame, self.base_frame, e))
 
         return False
 
@@ -225,6 +233,10 @@ class CmdVelSafety(object):
     def laser_rear_callback(self, msg):
         #with self.sensor_rear_lock:
         self.rear_obstacles = self.laser_scan_to_obstacles(msg, self.laser_rear_base_dist, pi)
+
+    def laser_rgbd_callback(self, msg):
+        #with self.sensor_rgbd_lock:
+        self.rgbd_obstacles = self.laser_scan_to_obstacles(msg, self.laser_rgbd_base_dist)
 
     def odom_input_callback(self, msg):
         #with self.odom_lock:
@@ -402,11 +414,11 @@ class CmdVelSafety(object):
             # only forward or backwards and accelerating
             target_accel = accel
         else:
-            target_accel = decel
-            # v2 < v1: just keep v2
+            # TODO: is this right?
+            # decelerating: just keep v2
             # Only increment velocity when accelerating.
-            # otherwise, keep the lowest one.
             # (this is done this way, because of weird approaching behavior)
+            # target_accel = decel
             return v2
 
         # use simulated d_velocity if lesser than actual dv.
@@ -495,8 +507,10 @@ class CmdVelSafety(object):
             # lists of tuples (distance, angle) to obstacles
             with self.sensor_front_lock:
                 obstacles = self.front_obstacles
-            with self.sensor_front_lock:
+            with self.sensor_rear_lock:
                 obstacles += self.rear_obstacles
+            with self.sensor_rgbd_lock:
+                obstacles += self.rgbd_obstacles
 
             # get real obstacles vs. not really obstacles.
             real_obstacles, dangerous_obstacles, candidate_obstacles = self.get_obstacle_in_toroid_section(
@@ -520,7 +534,7 @@ class CmdVelSafety(object):
                     return ("CLOCKWISE" if a > 0 else ("COUNTER CLOCKWISE" if a < 0 else "NOT ANGULAR"))
 
                 rospy.loginfo_throttle(
-                    0.1, ""
+                    1.0, ""
                     + "\n> Movement properties:"
                     + "\n  - inflated_radius : %.2f [m]." % (inflated_radius)
                     + "\n  - curvature_radius: %.2f [m]." % (curvature_radius)

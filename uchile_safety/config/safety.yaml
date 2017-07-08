@@ -13,6 +13,7 @@ angular_accel : 1.50    # [rad/s/s]. > 0. 1.74 is the nominal value for Pioneer 
 base_frame       : "/bender/base_link"
 laser_front_frame: "/bender/sensors/laser_front_link"
 laser_rear_frame : "/bender/sensors/laser_rear_link"
+laser_rgbd_frame : "/bender/sensors/rgbd_head_laser_link"
 
 # times
 control_rate: 10  # [Hz]. Keep it above 5Hz, but consider the highest sensor rate is 20Hz.

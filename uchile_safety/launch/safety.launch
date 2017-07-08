@@ -10,6 +10,7 @@
 	 	<!-- input sensors -->
 	 	<remap from="~scan_front" to="/bender/sensors/laser_front/scan_filtered"/>
 	 	<remap from="~scan_rear"  to="/bender/sensors/laser_rear/scan_filtered"/>
+	 	<remap from="~scan_rgbd"  to="/bender/sensors/rgbd_head/scan"/>
 
 	 	<!-- cmd_vel -->
 	 	<remap from="~input"  to="/bender/nav/mux/cmd_vel"/>
