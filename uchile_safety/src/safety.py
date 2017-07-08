@@ -28,27 +28,27 @@ class CmdVelSafety(object):
     - Publishes a safe cmd_vel.
     - Publishes a marker to visualize dangerous outcomes on rviz.
 
+    Developer Notes:
+    - Q: Why not to reduce the velocity step by step, but to send stop commands?
+      A: As the inflation radius is computed using the robot decel, you must send at least
+         a velocity reduction at that accel level. That is equivalent to send a stop command
+         and let the robot do the stopping job for you. 
+
     To Do List:
     ------------------------------
-    TODO: add pointcloud
     TODO: Manejar ruido de sensores ... moving average?
     TODO: Manejo de puntos ciegos ... que pasa si estaba previamente inscrito
     TODO: Caso en que radio curvatura cae dentro del robot
 
     Stalled:
     ------------------------------
-    TODO: mutex empeora la cosa?
+    TODO: Is mutex really neccesary? It seems it generates late responses.
     TODO: Use to max velocities to complement obstacle optimization
     TODO: Evitar dejar pegado el nodo al intentar procesar demasiados obstáculos
           no es necesario procesarlos todos, sólo basta encontrar uno que incomode
     TODO: Evitar revisar obstáculos innecesarios, limitando el rango angular de los sensores
           casos simples: forward veloz => no revisar rear.
     TODO: computos innecesarios (p.e visualización) en otro thread. Evitar afectar el thread principal.
-
-    Unsure:
-    ------------------------------
-    TODO: Reducir la velocidad en vez de dejarla en cero abruptamente
-    TODO: Use other params to make sure this range is not too low.
     """
 
     # COLORS
@@ -560,7 +560,7 @@ class CmdVelSafety(object):
             if real_obstacles:
                 # Send stop signals!
                 self.stop_motion()
-                rospy.logwarn_throttle(1.0, "Dangerous input cmd_vel wont be applied!")
+                rospy.logwarn_throttle(3.0, "Dangerous input cmd_vel wont be applied!")
             else:
                 # The velocity command is safe... send it!
                 self.send_velocity(_cmd_vel)

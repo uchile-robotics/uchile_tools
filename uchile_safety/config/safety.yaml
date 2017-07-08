@@ -4,10 +4,10 @@ min_linear_vel  : 0.01  # [m/s]  . > 0. The robot is considered to be stopped if
 max_linear_vel  : 0.80  # [m/s]  . > 0. Used to enforce velocity constraints.
 min_angular_vel : 0.01  # [m/s]  . > 0. The robot is considered to be stopped if issued velocity is lesser than this.
 max_angular_vel : 0.80  # [rad/s]. > 0. Used to enforce velocity constraints.
-linear_decel  : 0.25    # [m/s/s]. > 0. 0.3 is the nominal value for Pioneer 3AT
-linear_accel  : 0.25    # [m/s/s]. > 0. 0.3 is the nominal value for Pioneer 3AT
+linear_decel  : 0.20    # [m/s/s]. > 0. 0.3 is the nominal value for Pioneer 3AT
+linear_accel  : 0.35    # [m/s/s]. > 0. 0.3 is the nominal value for Pioneer 3AT
 angular_decel : 1.50    # [rad/s/s]. > 0. 1.74 is the nominal value for Pioneer 3AT
-angular_accel : 1.50    # [rad/s/s]. > 0. 1.74 is the nominal value for Pioneer 3AT
+angular_accel : 2.00    # [rad/s/s]. > 0. 1.74 is the nominal value for Pioneer 3AT
 
 # robot frames
 base_frame       : "/bender/base_link"
@@ -28,7 +28,7 @@ is_debug_enabled         : true  # prints debug information.
 is_visualization_enabled : true  # process markers for RVIZ. This can be a drawback on slower
                                  # systems or when the sensor resolution is too high.
 max_obstacle_range  : 1.5   # [m] ignore obstacles outside this radius
-sim_lookahead_factor: 1.0   # The velocity simulation will (de)increment the current
+sim_lookahead_factor: 2.0   # The velocity simulation will (de)increment the current
                             # velocity depending on the control_rate. This number is a multiplier
                             # for the velocity increment. It can be understood as how many control
                             # rates in the future to generate a velocity for. This must be > 0.
