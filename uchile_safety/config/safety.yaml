@@ -1,16 +1,18 @@
 
 # robot cinematic parameters
-min_linear_velocity  : 0.01  # [m/s]  . > 0. The robot is considered to be stopped if issued velocity is lesser than this.
-min_angular_velocity : 0.01  # [m/s]  . > 0. The robot is considered to be stopped if issued velocity is lesser than this.
-max_linear_velocity  : 0.80  # [m/s]  . > 0. Used to enforce velocity constraints.
-max_angular_velocity : 0.80  # [rad/s]. > 0. Used to enforce velocity constraints.
-linear_deacceleration: 0.30  # [m/s/s]. > 0. 0.3 is the nominal value for Pioneer 3AT
+min_linear_vel  : 0.01  # [m/s]  . > 0. The robot is considered to be stopped if issued velocity is lesser than this.
+max_linear_vel  : 0.80  # [m/s]  . > 0. Used to enforce velocity constraints.
+min_angular_vel : 0.01  # [m/s]  . > 0. The robot is considered to be stopped if issued velocity is lesser than this.
+max_angular_vel : 0.80  # [rad/s]. > 0. Used to enforce velocity constraints.
+linear_decel  : 0.25    # [m/s/s]. > 0. 0.3 is the nominal value for Pioneer 3AT
+linear_accel  : 0.25    # [m/s/s]. > 0. 0.3 is the nominal value for Pioneer 3AT
+angular_decel : 1.50    # [rad/s/s]. > 0. 1.74 is the nominal value for Pioneer 3AT
+angular_accel : 1.50    # [rad/s/s]. > 0. 1.74 is the nominal value for Pioneer 3AT
 
-# robot geometry
-robot_radius     : 0.40 # [m]. This is the minimum inflation radius.
+# robot frames
+base_frame       : "/bender/base_link"
 laser_front_frame: "/bender/sensors/laser_front_link"
 laser_rear_frame : "/bender/sensors/laser_rear_link"
-base_frame       : "/bender/base_link"
 
 # times
 control_rate: 10  # [Hz]. Keep it above 5Hz, but consider the highest sensor rate is 20Hz.
@@ -18,7 +20,19 @@ odom_timeout: 0.5 # [s]. How long it takes to consider the odometry to be obsole
 cmd_timeout: 0.5  # [s]. How long it takes to consider the cmd_vel command to be obsolete.
 
 # misc
-is_debug_enabled        : false # prints debug information.
-is_visualization_enabled: true  # process markers for RVIZ. This can be a drawback on slower
-                                # systems or when the sensor resolution is too high.
-max_obstacle_range: 1.5   # [m] ignore obstacles outside this radius
+robot_radius             : 0.30  # [m]. This is the real robot radius.
+min_distance_to_obstacles: 0.15  # [m]. How many meters away from obstacles the robot will stop movement.
+                                 # This is added to the robot radius in order to compute the minimum inflation radius.
+is_debug_enabled         : true  # prints debug information.
+is_visualization_enabled : true  # process markers for RVIZ. This can be a drawback on slower
+                                 # systems or when the sensor resolution is too high.
+max_obstacle_range  : 1.5   # [m] ignore obstacles outside this radius
+sim_lookahead_factor: 1.0   # The velocity simulation will (de)increment the current
+                            # velocity depending on the control_rate. This number is a multiplier
+                            # for the velocity increment. It can be understood as how many control
+                            # rates in the future to generate a velocity for. This must be > 0.
+                            #
+                            # PS. Using sim_lookahead_factor = control_rate means the to have a
+                            # sim_time of 1 second!.
+                            # Otherwise, the sim_time can be computed as:
+                            #    control_rate / sim_lookahead_factor.  

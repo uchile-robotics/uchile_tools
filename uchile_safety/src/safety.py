@@ -30,6 +30,7 @@ class CmdVelSafety(object):
 
     To Do List:
     ------------------------------
+    TODO: add pointcloud
     TODO: Manejar ruido de sensores ... moving average?
     TODO: Manejo de puntos ciegos ... que pasa si estaba previamente inscrito
     TODO: Caso en que radio curvatura cae dentro del robot
@@ -61,14 +62,17 @@ class CmdVelSafety(object):
         # ROS Parameters
 
         # robot cinematic parameters
-        self.min_linear_velocity = rospy.get_param("~min_linear_velocity", 0.01)
-        self.max_linear_velocity = rospy.get_param("~max_linear_velocity", 0.8)
-        self.min_angular_velocity = rospy.get_param("~min_angular_velocity", 0.01)
-        self.max_angular_velocity = rospy.get_param("~max_angular_velocity", 0.8)
-        self.linear_deacceleration = rospy.get_param("~linear_deacceleration", 0.3)
+        self.min_linear_vel = rospy.get_param("~min_linear_vel", 0.01)
+        self.max_linear_vel = rospy.get_param("~max_linear_vel", 0.80)
+        self.min_angular_vel = rospy.get_param("~min_angular_vel", 0.01)
+        self.max_angular_vel = rospy.get_param("~max_angular_vel", 0.80)
+        self.linear_decel = rospy.get_param("~linear_decel", 0.3)
+        self.linear_accel = rospy.get_param("~linear_accel", 0.3)
+        self.angular_decel = rospy.get_param("~angular_decel", 1.74)
+        self.angular_accel = rospy.get_param("~angular_accel", 1.74)
 
         # robot geometry
-        self.robot_radius = rospy.get_param("~robot_radius", 0.4)
+        robot_radius = rospy.get_param("~robot_radius", 0.4)
         self.base_frame = rospy.get_param("~base_link", "/bender/base_link")
         self.laser_front_frame = rospy.get_param("~laser_front_link", "/bender/sensors/laser_front_link")
         self.laser_rear_frame = rospy.get_param("~laser_rear_link", "/bender/sensors/laser_rear_link")
@@ -79,6 +83,10 @@ class CmdVelSafety(object):
         control_rate = rospy.get_param("~control_rate", 10)
         odom_timeout = rospy.get_param("~odom_timeout", 0.5)
         cmd_timeout = rospy.get_param("~cmd_timeout", 0.5)
+        sim_lookahead_factor = rospy.get_param("~sim_lookahead_factor", 3.0)
+        min_distance_to_obstacles = rospy.get_param("~min_distance_to_obstacles", 0.1)
+        self.min_inflation_radius = robot_radius + min_distance_to_obstacles
+        self.sim_time = float(sim_lookahead_factor) / float(control_rate)
         self.is_debug_enabled = rospy.get_param("~is_debug_enabled", False)
         self.is_visualization_enabled = rospy.get_param("~is_visualization_enabled", False)
         self.max_obstacle_range = rospy.get_param("~max_obstacle_range", 2.0)
@@ -249,7 +257,7 @@ class CmdVelSafety(object):
         - a = deacel
         - d = desired
 
-        The inflated radius is always greater than the robot_radius,
+        The inflated radius is always greater than the min_inflation_radius,
         because the computed stop distance must the added to the
         external most point of the footprint!.
 
@@ -258,14 +266,14 @@ class CmdVelSafety(object):
         """
         inflated = 0.0
         linear_vel = abs(cmd_vel.linear.x)
-        if linear_vel > self.min_linear_velocity:
+        if linear_vel > self.min_linear_vel:
             a = linear_vel * linear_vel
-            b = (2.0 * self.linear_deacceleration)
+            b = (2.0 * self.linear_decel)
             inflated = a / b
-        return self.robot_radius + inflated
+        return self.min_inflation_radius + inflated
 
     def get_curvature_radius(self, cmd_vel):
-        if abs(cmd_vel.angular.z) < self.min_angular_velocity:
+        if abs(cmd_vel.angular.z) < self.min_angular_vel:
             return 0
         return abs(cmd_vel.linear.x / cmd_vel.angular.z)
 
@@ -276,7 +284,7 @@ class CmdVelSafety(object):
             >   0 if the cmd_vel moves does not move the robot (just linear!)
             >  -1 if the cmd_vel moves the robot backwards
         """
-        if abs(cmd_vel.linear.x) < self.min_linear_velocity:
+        if abs(cmd_vel.linear.x) < self.min_linear_vel:
             return 0
         if cmd_vel.linear.x > 0:
             return 1
@@ -291,7 +299,7 @@ class CmdVelSafety(object):
             >   0 if the cmd_vel moves does not rotates the robot
             >  -1 if the cmd_vel moves the robot counter-clockwise
         """
-        if abs(cmd_vel.angular.z) < self.min_angular_velocity:
+        if abs(cmd_vel.angular.z) < self.min_angular_vel:
             return 0
         if cmd_vel.angular.z > 0:
             return 1
@@ -302,7 +310,7 @@ class CmdVelSafety(object):
     def attempts_to_move(self, cmd_vel):
         vx = abs(cmd_vel.linear.x)
         va = abs(cmd_vel.angular.z)
-        if (vx > self.min_linear_velocity or va > self.min_angular_velocity):
+        if (vx > self.min_linear_vel or va > self.min_angular_vel):
             return True
         return False
 
@@ -328,8 +336,8 @@ class CmdVelSafety(object):
 
         # compute small and big toroid circle params
         rm = curvature_radius
-        r1 = curvature_radius - self.robot_radius
-        r2 = curvature_radius + self.robot_radius
+        r1 = curvature_radius - self.min_inflation_radius
+        r2 = curvature_radius + self.min_inflation_radius
         x0 = 0
         y0 = linear_orientation * angular_orientation * rm
 
@@ -358,7 +366,7 @@ class CmdVelSafety(object):
                     continue
 
                 # obstacle inside the rectangle
-                if abs(y) > self.robot_radius:
+                if abs(y) > self.min_inflation_radius:
                     dangerous.append(obstacle)
                     continue
 
@@ -383,6 +391,41 @@ class CmdVelSafety(object):
             real.append(obstacle)
         return real, dangerous, candidates
 
+    def get_next_vel(self, v1, v2, accel, decel, min_vel):
+        # just no movement
+        if abs(v2) < min_vel:
+            return 0
+        if v1 == v2:
+            return v2
+        dv = v2 - v1
+        if v1 * v2 > 0 and abs(v1) < abs(v2):
+            # only forward or backwards and accelerating
+            target_accel = accel
+        else:
+            target_accel = decel
+            # v2 < v1: just keep v2
+            # Only increment velocity when accelerating.
+            # otherwise, keep the lowest one.
+            # (this is done this way, because of weird approaching behavior)
+            return v2
+
+        # use simulated d_velocity if lesser than actual dv.
+        sim_dv = target_accel * self.sim_time
+        if abs(sim_dv) < abs(dv):
+            dv_sign = dv / abs(dv)
+            dv = dv_sign * sim_dv
+
+        vf = v1 + dv
+        if vf == 0:
+            return 0
+        # send a velocity just a little higher than min_vel.
+        # this avoids to stay in a infinite loop trying to
+        # exit the local
+        # Use the target velocity sign!, not the final velocity.
+        if abs(vf) <= min_vel:
+            vf = min_vel * 1.1 * v2 / abs(v2)
+        return vf
+
     # =========================================================================
     # Main Processing method
     # =========================================================================
@@ -396,9 +439,6 @@ class CmdVelSafety(object):
         # with self.cmd_lock:
         _cmd_vel = self.cmd_vel
         _cmd_time = self.last_cmd_time
-
-        # TODO: Considerar velocidad enviada o delta para computo de inflación
-        # TODO: Manejo de curr_vel vs. cmd_vel cuando son parecidas. self.linear_acceleration = abs(0.35)  # m/s/s
 
         try:
             now = rospy.Time.now()
@@ -423,29 +463,33 @@ class CmdVelSafety(object):
                 return
 
             # --- select target velocity ---
-            curr_linear_orientation = self.get_linear_movement_orientation(_odom_vel)
-            curr_angular_orientation = self.get_angular_movement_orientation(_odom_vel)
-            req_linear_orientation = self.get_linear_movement_orientation(_cmd_vel)
-            req_angular_orientation = self.get_angular_movement_orientation(_cmd_vel)
-            simulated_cmd_vel = _odom_vel
-            if not is_moving:
-                # robot is stopped => use _cmd_vel
-                simulated_cmd_vel = _cmd_vel
-            # TODO: analyze this:
-            # else:
-            #     # increment/decrement velocity by acceleration
-            #     simulated_cmd_vel = ...
+            target_vel = Twist()
+
+            target_vel.linear.x = self.get_next_vel(
+                _odom_vel.linear.x,
+                _cmd_vel.linear.x,
+                self.linear_accel,
+                self.linear_decel,
+                self.min_linear_vel
+            )
+            target_vel.angular.z = self.get_next_vel(
+                _odom_vel.angular.z,
+                _cmd_vel.angular.z,
+                self.angular_accel,
+                self.angular_decel,
+                self.min_angular_vel
+            )
 
             # --- movement properties ---
-            linear_orientation = self.get_linear_movement_orientation(simulated_cmd_vel)
-            angular_orientation = self.get_angular_movement_orientation(simulated_cmd_vel)
-            inflated_radius = self.get_inflated_radius(simulated_cmd_vel)
-            curvature_radius = self.get_curvature_radius(simulated_cmd_vel)
-            # if linear_orientation == 0 and angular_orientation == 0:
-            #     # the required velocity is too small, because of a in(de)crement
-            #     self.send_velocity(Twist())
-            #     self.spin_rate.sleep()
-            #     return
+            linear_orientation = self.get_linear_movement_orientation(target_vel)
+            angular_orientation = self.get_angular_movement_orientation(target_vel)
+            inflated_radius = self.get_inflated_radius(target_vel)
+            curvature_radius = self.get_curvature_radius(target_vel)
+            if linear_orientation == 0 and angular_orientation == 0:
+                # target velocity is the required velocity is too small, because of a in(de)crement
+                self.send_velocity(Twist())
+                self.spin_rate.sleep()
+                return
 
             # -- separate obstacles into useful categories --
             # lists of tuples (distance, angle) to obstacles
@@ -463,6 +507,10 @@ class CmdVelSafety(object):
 
             # -- just for debugging --
             if self.is_debug_enabled:
+                curr_linear_orientation = self.get_linear_movement_orientation(_odom_vel)
+                curr_angular_orientation = self.get_angular_movement_orientation(_odom_vel)
+                req_linear_orientation = self.get_linear_movement_orientation(_cmd_vel)
+                req_angular_orientation = self.get_angular_movement_orientation(_cmd_vel)
                 remaining_obstacles = len(obstacles) - len(real_obstacles) - len(dangerous_obstacles) - len(candidate_obstacles)
 
                 def linear_to_string(x):
@@ -472,17 +520,22 @@ class CmdVelSafety(object):
                     return ("CLOCKWISE" if a > 0 else ("COUNTER CLOCKWISE" if a < 0 else "NOT ANGULAR"))
 
                 rospy.loginfo_throttle(
-                    1.0, ""
+                    0.1, ""
                     + "\n> Movement properties:"
-                    + "\n  - inflated_radius: %.2f [m]." % (inflated_radius)
+                    + "\n  - inflated_radius : %.2f [m]." % (inflated_radius)
                     + "\n  - curvature_radius: %.2f [m]." % (curvature_radius)
                     + "\n> Movement direction:"
                     + "\n  - current  : %s, %s" % (linear_to_string(curr_linear_orientation), angular_to_string(curr_angular_orientation))
                     + "\n  - requested: %s, %s" % (linear_to_string(req_linear_orientation), angular_to_string(req_angular_orientation))
+                    + "\n  - target   : %s, %s" % (linear_to_string(linear_orientation), angular_to_string(angular_orientation))
                     + "\n> Velocities:"
                     + "\n  - current  : %.2f[m/s], %.2f[rad/s]." % (_odom_vel.linear.x, _odom_vel.angular.z)
                     + "\n  - required : %.2f[m/s], %.2f[rad/s]." % (_cmd_vel.linear.x, _cmd_vel.angular.z)
-                    + "\n  - simulated: %.2f[m/s], %.2f[rad/s]." % (simulated_cmd_vel.linear.x, simulated_cmd_vel.angular.z)
+                    + "\n  - target   : %.2f[m/s], %.2f[rad/s]." % (target_vel.linear.x, target_vel.angular.z)
+                    + "\n> Simulation:"
+                    + "\n  - sim_time: %.2f[m/s]." % (self.sim_time)
+                    + "\n  - dv accel: %.2f[m/s], %.2f[rad/s]." % (self.sim_time * self.linear_accel, self.sim_time * self.angular_accel)
+                    + "\n  - dv decel: %.2f[m/s], %.2f[rad/s]." % (self.sim_time * self.linear_decel, self.sim_time * self.angular_decel)
                     + "\n> There are %d relevant obstacles." % (len(real_obstacles) + len(dangerous_obstacles))
                     + "\n  - %3d real" % (len(real_obstacles))
                     + "\n  - %3d dangerous" % (len(dangerous_obstacles))
@@ -490,19 +543,13 @@ class CmdVelSafety(object):
                     + "\n  - %3d ignored" % (remaining_obstacles)
                 )
 
-            is_required_cmd_obsolete = False
-            if is_required_cmd_obsolete:
-                # just stop the robot... no signal required
-                self.send_velocity(Twist())
-                rospy.logwarn_throttle(5.0, "Required cmd vel is obsolete ... stopping the robot.")
+            if real_obstacles:
+                # Send stop signals!
+                self.stop_motion()
+                rospy.logwarn_throttle(1.0, "Dangerous input cmd_vel wont be applied!")
             else:
-                if real_obstacles:
-                    # Send stop signals!
-                    self.stop_motion()
-                    rospy.logwarn_throttle(1.0, "Dangerous input cmd_vel wont be applied!")
-                else:
-                    # The velocity command is safe... send it!
-                    self.send_velocity(_cmd_vel)
+                # The velocity command is safe... send it!
+                self.send_velocity(_cmd_vel)
 
             # visualization
             if self.is_visualization_enabled:
@@ -531,10 +578,10 @@ class CmdVelSafety(object):
         self.stop_triggered_pub.publish(Empty())
 
     def send_velocity(self, cmd):
-        cmd.linear.x = min(cmd.linear.x, self.max_linear_velocity)
-        cmd.linear.x = max(cmd.linear.x, -self.max_linear_velocity)
-        cmd.angular.x = min(cmd.angular.x, self.max_angular_velocity)
-        cmd.angular.x = max(cmd.angular.x, -self.max_angular_velocity)
+        cmd.linear.x = min(cmd.linear.x, self.max_linear_vel)
+        cmd.linear.x = max(cmd.linear.x, -self.max_linear_vel)
+        cmd.angular.x = min(cmd.angular.x, self.max_angular_vel)
+        cmd.angular.x = max(cmd.angular.x, -self.max_angular_vel)
         self.vel_pub.publish(cmd)
 
     # =========================================================================
@@ -556,8 +603,8 @@ class CmdVelSafety(object):
         marker.color.b = 1.0
         marker.color.a = 1.0
         sections = 20
-        r1 = curvature_radius - self.robot_radius
-        r2 = curvature_radius + self.robot_radius
+        r1 = curvature_radius - self.min_inflation_radius
+        r2 = curvature_radius + self.min_inflation_radius
 
         # only linear velocity
         if curvature_radius == 0.0:
