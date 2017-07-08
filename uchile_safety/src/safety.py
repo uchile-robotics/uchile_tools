@@ -13,6 +13,7 @@ from visualization_msgs.msg import Marker, MarkerArray
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import LaserScan
 from uchile_srvs.srv import Transformer
+from threading import Lock
 
 
 class CmdVelSafety(object):
@@ -43,6 +44,7 @@ class CmdVelSafety(object):
           no es necesario procesarlos todos, sólo basta encontrar uno que incomode
     TODO: Evitar revisar obstáculos innecesarios, limitando el rango angular de los sensores
           casos simples: forward veloz => no revisar rear.
+    TODO: computos innecesarios (p.e visualización) en otro thread. Evitar afectar el thread principal.
 
     Unsure:
     ------------------------------
@@ -58,15 +60,7 @@ class CmdVelSafety(object):
     def __init__(self):
 
         # =====================================================================
-        # Logic Variables
-
-        # default obstacles
-        self.front_obstacles = list()
-        self.rear_obstacles = list()
-
-        # default laser positions
-        self.laser_front_base_dist = None
-        self.laser_rear_base_dist = None
+        # ROS Parameters
 
         # robot cinematic parameters
         self.min_linear_velocity = rospy.get_param("~min_linear_velocity", 0.01)
@@ -80,22 +74,38 @@ class CmdVelSafety(object):
         self.base_frame = rospy.get_param("~base_link", "/bender/base_link")
         self.laser_front_frame = rospy.get_param("~laser_front_link", "/bender/sensors/laser_front_link")
         self.laser_rear_frame = rospy.get_param("~laser_rear_link", "/bender/sensors/laser_rear_link")
+        self.laser_front_base_dist = None
+        self.laser_rear_base_dist = None
 
         # misc
         control_rate = rospy.get_param("~control_rate", 10)
         odom_timeout = rospy.get_param("~odom_timeout", 0.5)
         cmd_timeout = rospy.get_param("~cmd_timeout", 0.5)
         self.is_debug_enabled = rospy.get_param("~is_debug_enabled", False)
+        self.is_visualization_enabled = rospy.get_param("~is_visualization_enabled", False)
         self.max_obstacle_range = rospy.get_param("~max_obstacle_range", 2.0)
         self.odom_timeout = rospy.Duration.from_sec(odom_timeout)
         self.cmd_timeout = rospy.Duration.from_sec(cmd_timeout)
         self.spin_rate = rospy.Rate(control_rate)
 
-        # Subscriber variables
-        self.curr_vel = Twist()
-        self.cmd_vel = Twist()
+        # =====================================================================
+        # Control variables
+
+        # odometry
+        self.odom_vel = Twist()
         self.last_odom_time = rospy.Time.now()
+        self.odom_lock = Lock()
+
+        # input commands
+        self.cmd_vel = Twist()
         self.last_cmd_time = rospy.Time.now()
+        self.cmd_lock = Lock()
+
+        # sensor readings
+        self.front_obstacles = list()
+        self.rear_obstacles = list()
+        self.sensor_front_lock = Lock()
+        self.sensor_rear_lock = Lock()
 
         # =====================================================================
         # ROS Interface
@@ -119,10 +129,10 @@ class CmdVelSafety(object):
     # =========================================================================
 
     def _setup_subscribers(self):
-        self.laser_front_sub = rospy.Subscriber('~scan_front', LaserScan, self.laser_front_input_cb_v2, queue_size=1)
-        self.laser_rear_sub = rospy.Subscriber('~scan_rear', LaserScan, self.laser_rear_input_cb_v2, queue_size=1)
-        self.vel_sub = rospy.Subscriber("~input", Twist, self.velocity_input_cb, queue_size=1)
-        self.odom_sub = rospy.Subscriber("~odom", Odometry, self.odom_input_cb, queue_size=1)
+        self.laser_front_sub = rospy.Subscriber('~scan_front', LaserScan, self.laser_front_callback, queue_size=1)
+        self.laser_rear_sub = rospy.Subscriber('~scan_rear', LaserScan, self.laser_rear_callback, queue_size=1)
+        self.vel_sub = rospy.Subscriber("~input", Twist, self.cmd_callback, queue_size=1)
+        self.odom_sub = rospy.Subscriber("~odom", Odometry, self.odom_input_callback, queue_size=1)
 
     def get_laser_to_base_transform(self, dist, ang, input_frame, target_frame):
         """
@@ -202,19 +212,23 @@ class CmdVelSafety(object):
             theta_ += msg.angle_increment
         return obstacles
 
-    def laser_front_input_cb_v2(self, msg):
-        self.front_obstacles = self.laser_scan_to_obstacles(msg, self.laser_front_base_dist)
+    def laser_front_callback(self, msg):
+        with self.sensor_front_lock:
+            self.front_obstacles = self.laser_scan_to_obstacles(msg, self.laser_front_base_dist)
 
-    def laser_rear_input_cb_v2(self, msg):
-        self.rear_obstacles = self.laser_scan_to_obstacles(msg, self.laser_rear_base_dist, pi)
+    def laser_rear_callback(self, msg):
+        with self.sensor_rear_lock:
+            self.rear_obstacles = self.laser_scan_to_obstacles(msg, self.laser_rear_base_dist, pi)
 
-    def odom_input_cb(self, msg):
-        self.last_odom_time = msg.header.stamp
-        self.curr_vel = msg.twist.twist
+    def odom_input_callback(self, msg):
+        with self.odom_lock:
+            self.last_odom_time = msg.header.stamp
+            self.odom_vel = msg.twist.twist
 
-    def velocity_input_cb(self, msg):
-        self.last_cmd_time = rospy.Time.now()
-        self.cmd_vel = msg
+    def cmd_callback(self, msg):
+        with self.cmd_lock:
+            self.last_cmd_time = rospy.Time.now()
+            self.cmd_vel = msg
 
     # =========================================================================
     # Aux methods
@@ -294,13 +308,6 @@ class CmdVelSafety(object):
             return True
         return False
 
-    def is_point_inside_circle(self, r, x0, y0, x, y):
-        dx = (x - x0)
-        dy = (y - y0)
-        if dx * dx + dy * dy <= r * r:
-            return True
-        return False
-
     def get_obstacle_in_toroid_section(self, obstacles, inflated_radius, curvature_radius, linear_orientation, angular_orientation):
         """
         returns a list of inscribed obstacles on the toroid section
@@ -367,21 +374,16 @@ class CmdVelSafety(object):
                 continue
 
             # obstacle must be outside the small circle
-            if self.is_point_inside_circle(r1, x0, y0, x, y):
+            if _is_point_inside_circle(r1, x0, y0, x, y):
                 dangerous.append(obstacle)
                 continue
 
             # obstacle must be inside the big circle
-            if not self.is_point_inside_circle(r2, x0, y0, x, y):
+            if not _is_point_inside_circle(r2, x0, y0, x, y):
                 dangerous.append(obstacle)
                 continue
             real.append(obstacle)
         return real, dangerous, candidates
-
-    def is_something_obsolete(self, now, last, timeout):
-        if (now - last) > timeout:
-            return True
-        return False
 
     # =========================================================================
     # Main Processing method
@@ -389,12 +391,20 @@ class CmdVelSafety(object):
 
     def spin_once(self):
 
+        # work on fixed and consistent data!
+        with self.odom_lock:
+            _odom_vel = self.odom_vel
+            _odom_time = self.last_odom_time
+        with self.cmd_lock:
+            _cmd_vel = self.cmd_vel
+            _cmd_time = self.last_cmd_time
+
         try:
             now = rospy.Time.now()
-            is_odom_obsolete = self.is_something_obsolete(now, self.last_odom_time, self.odom_timeout)
-            is_cmd_obsolete = self.is_something_obsolete(now, self.last_cmd_time, self.cmd_timeout)
-            is_moving = (not is_cmd_obsolete) and self.attempts_to_move(self.curr_vel)
-            wants_to_move = (not is_odom_obsolete) and self.attempts_to_move(self.cmd_vel)
+            is_odom_obsolete = _is_something_obsolete(now, _odom_time, self.odom_timeout)
+            is_cmd_obsolete = _is_something_obsolete(now, _cmd_time, self.cmd_timeout)
+            is_moving = (not is_cmd_obsolete) and self.attempts_to_move(_odom_vel)
+            wants_to_move = (not is_odom_obsolete) and self.attempts_to_move(_cmd_vel)
 
             # odometry is obsolete
             if is_odom_obsolete:
@@ -412,24 +422,24 @@ class CmdVelSafety(object):
                 return
 
             # --- select target velocity ---
-            curr_linear_orientation = self.get_linear_movement_orientation(self.curr_vel)
-            curr_angular_orientation = self.get_angular_movement_orientation(self.curr_vel)
-            req_linear_orientation = self.get_linear_movement_orientation(self.cmd_vel)
-            req_angular_orientation = self.get_angular_movement_orientation(self.cmd_vel)
-            cmd_vel = self.curr_vel
+            curr_linear_orientation = self.get_linear_movement_orientation(_odom_vel)
+            curr_angular_orientation = self.get_angular_movement_orientation(_odom_vel)
+            req_linear_orientation = self.get_linear_movement_orientation(_cmd_vel)
+            req_angular_orientation = self.get_angular_movement_orientation(_cmd_vel)
+            simulated_cmd_vel = _odom_vel
             if not is_moving:
-                # robot is stopped => use cmd_vel
-                cmd_vel = self.cmd_vel
+                # robot is stopped => use _cmd_vel
+                simulated_cmd_vel = _cmd_vel
             # TODO: analyze this:
             # else:
             #     # increment/decrement velocity by acceleration
-            #     cmd_vel = ...
+            #     simulated_cmd_vel = ...
 
             # --- movement properties ---
-            linear_orientation = self.get_linear_movement_orientation(cmd_vel)
-            angular_orientation = self.get_angular_movement_orientation(cmd_vel)
-            inflated_radius = self.get_inflated_radius(cmd_vel)
-            curvature_radius = self.get_curvature_radius(cmd_vel)
+            linear_orientation = self.get_linear_movement_orientation(simulated_cmd_vel)
+            angular_orientation = self.get_angular_movement_orientation(simulated_cmd_vel)
+            inflated_radius = self.get_inflated_radius(simulated_cmd_vel)
+            curvature_radius = self.get_curvature_radius(simulated_cmd_vel)
             # if linear_orientation == 0 and angular_orientation == 0:
             #     # the required velocity is too small, because of a in(de)crement
             #     self.send_velocity(Twist())
@@ -438,7 +448,10 @@ class CmdVelSafety(object):
 
             # -- separate obstacles into useful categories --
             # lists of tuples (distance, angle) to obstacles
-            obstacles = self.front_obstacles + self.rear_obstacles
+            with self.sensor_front_lock:
+                obstacles = self.front_obstacles
+            with self.sensor_front_lock:
+                obstacles += self.rear_obstacles
 
             # get real obstacles vs. not really obstacles.
             real_obstacles, dangerous_obstacles, candidate_obstacles = self.get_obstacle_in_toroid_section(
@@ -466,8 +479,9 @@ class CmdVelSafety(object):
                     + "\n  - current  : %s, %s" % (linear_to_string(curr_linear_orientation), angular_to_string(curr_angular_orientation))
                     + "\n  - requested: %s, %s" % (linear_to_string(req_linear_orientation), angular_to_string(req_angular_orientation))
                     + "\n> Velocities:"
-                    + "\n  - current : %.2f[m/s], %.2f[rad/s]" % (self.curr_vel.linear.x, self.curr_vel.angular.z)
-                    + "\n  - required: %.2f[m/s], %.2f[rad/s]." % (self.cmd_vel.linear.x, self.cmd_vel.angular.z)
+                    + "\n  - current  : %.2f[m/s], %.2f[rad/s]." % (_odom_vel.linear.x, _odom_vel.angular.z)
+                    + "\n  - required : %.2f[m/s], %.2f[rad/s]." % (_cmd_vel.linear.x, _cmd_vel.angular.z)
+                    + "\n  - simulated: %.2f[m/s], %.2f[rad/s]." % (simulated_cmd_vel.linear.x, simulated_cmd_vel.angular.z)
                     + "\n> There are %d relevant obstacles." % (len(real_obstacles) + len(dangerous_obstacles))
                     + "\n  - %3d real" % (len(real_obstacles))
                     + "\n  - %3d dangerous" % (len(dangerous_obstacles))
@@ -484,21 +498,22 @@ class CmdVelSafety(object):
                 if real_obstacles:
                     # Send stop signals!
                     self.stop_motion()
-                    rospy.logwarn_throttle(1.0, "Dangerous cmd_vel wont be applied!")
+                    rospy.logwarn_throttle(1.0, "Dangerous input cmd_vel wont be applied!")
                 else:
                     # The velocity command is safe... send it!
-                    self.send_velocity(self.cmd_vel)
+                    self.send_velocity(_cmd_vel)
 
             # visualization
-            self.visualize_markers(
-                inflated_radius,
-                curvature_radius,
-                linear_orientation,
-                angular_orientation,
-                real_obstacles,
-                dangerous_obstacles,
-                candidate_obstacles
-            )
+            if self.is_visualization_enabled:
+                self.visualize_markers(
+                    inflated_radius,
+                    curvature_radius,
+                    linear_orientation,
+                    angular_orientation,
+                    real_obstacles,
+                    dangerous_obstacles,
+                    candidate_obstacles
+                )
 
         except Exception as e:
             rospy.logerr("An error occurred. Sending stop cmd_vel to the base. Error description: %s" % e)
@@ -657,6 +672,20 @@ def _distance(p1, p2):
         dy = (p1.y - p2.y)
         dz = (p1.z - p2.z)
         return sqrt(dx * dx + dy * dy + dz * dz)
+
+
+def _is_point_inside_circle(r, x0, y0, x, y):
+        dx = (x - x0)
+        dy = (y - y0)
+        if dx * dx + dy * dy <= r * r:
+            return True
+        return False
+
+
+def _is_something_obsolete(now, last, timeout):
+        if (now - last) > timeout:
+            return True
+        return False
 
 
 def main():
