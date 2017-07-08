@@ -31,14 +31,12 @@ class CmdVelSafety(object):
     To Do List:
     ------------------------------
     TODO: Manejar ruido de sensores ... moving average?
-    TODO: Considerar velocidad enviada o delta para computo de inflación
-    TODO: Manejo de curr_vel vs. cmd_vel cuando son parecidas. self.linear_acceleration = abs(0.35)  # m/s/s
-    TODO: Caso en que radio curvatura cae dentro del robot
     TODO: Manejo de puntos ciegos ... que pasa si estaba previamente inscrito
-    TODO: Mutex para obstáculos y cmd_vel
+    TODO: Caso en que radio curvatura cae dentro del robot
 
     Stalled:
     ------------------------------
+    TODO: mutex empeora la cosa?
     TODO: Use to max velocities to complement obstacle optimization
     TODO: Evitar dejar pegado el nodo al intentar procesar demasiados obstáculos
           no es necesario procesarlos todos, sólo basta encontrar uno que incomode
@@ -392,12 +390,15 @@ class CmdVelSafety(object):
     def spin_once(self):
 
         # work on fixed and consistent data!
-        with self.odom_lock:
-            _odom_vel = self.odom_vel
-            _odom_time = self.last_odom_time
-        with self.cmd_lock:
-            _cmd_vel = self.cmd_vel
-            _cmd_time = self.last_cmd_time
+        # with self.odom_lock:
+        _odom_vel = self.odom_vel
+        _odom_time = self.last_odom_time
+        # with self.cmd_lock:
+        _cmd_vel = self.cmd_vel
+        _cmd_time = self.last_cmd_time
+
+        # TODO: Considerar velocidad enviada o delta para computo de inflación
+        # TODO: Manejo de curr_vel vs. cmd_vel cuando son parecidas. self.linear_acceleration = abs(0.35)  # m/s/s
 
         try:
             now = rospy.Time.now()
@@ -406,7 +407,7 @@ class CmdVelSafety(object):
             is_moving = (not is_cmd_obsolete) and self.attempts_to_move(_odom_vel)
             wants_to_move = (not is_odom_obsolete) and self.attempts_to_move(_cmd_vel)
 
-            # odometry is obsolete
+            # --- odometry is obsolete ---
             if is_odom_obsolete:
                 self.send_velocity(Twist())
                 rospy.logwarn_throttle(5.0, "Robot odometry is obsolete. Won't move.")

@@ -23,13 +23,13 @@ subscribers:
 
   - name: "Safety Layer"
     topic: "/bender/nav/safety/cmd_vel"
-    timeout: 1
+    timeout: 0.5
     priority: 2
     short_desc: "Low level safety control, possible to override using the joystick"
 
   - name: "High Priority Joystick"
     topic: "/bender/joy/base/master_cmd_vel"
-    timeout: 5
+    timeout: 0.2
     priority: 3
     short_desc: "User controlled commands, they have priority over the low level security layer assuming the user knows what they're doing"
 
