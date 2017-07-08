@@ -21,4 +21,4 @@ cmd_timeout: 0.5  # [s]. How long it takes to consider the cmd_vel command to be
 is_debug_enabled        : false # prints debug information.
 is_visualization_enabled: true  # process markers for RVIZ. This can be a drawback on slower
                                 # systems or when the sensor resolution is too high.
-max_obstacle_range: 2.0   # [m] ignore obstacles outside this radius
+max_obstacle_range: 1.5   # [m] ignore obstacles outside this radius

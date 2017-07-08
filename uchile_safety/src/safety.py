@@ -213,22 +213,22 @@ class CmdVelSafety(object):
         return obstacles
 
     def laser_front_callback(self, msg):
-        with self.sensor_front_lock:
-            self.front_obstacles = self.laser_scan_to_obstacles(msg, self.laser_front_base_dist)
+        #with self.sensor_front_lock:
+        self.front_obstacles = self.laser_scan_to_obstacles(msg, self.laser_front_base_dist)
 
     def laser_rear_callback(self, msg):
-        with self.sensor_rear_lock:
-            self.rear_obstacles = self.laser_scan_to_obstacles(msg, self.laser_rear_base_dist, pi)
+        #with self.sensor_rear_lock:
+        self.rear_obstacles = self.laser_scan_to_obstacles(msg, self.laser_rear_base_dist, pi)
 
     def odom_input_callback(self, msg):
-        with self.odom_lock:
-            self.last_odom_time = msg.header.stamp
-            self.odom_vel = msg.twist.twist
+        #with self.odom_lock:
+        self.last_odom_time = msg.header.stamp
+        self.odom_vel = msg.twist.twist
 
     def cmd_callback(self, msg):
-        with self.cmd_lock:
-            self.last_cmd_time = rospy.Time.now()
-            self.cmd_vel = msg
+        #with self.cmd_lock:
+        self.last_cmd_time = rospy.Time.now()
+        self.cmd_vel = msg
 
     # =========================================================================
     # Aux methods

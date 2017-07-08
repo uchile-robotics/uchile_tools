@@ -5,14 +5,14 @@
 	 	<rosparam command="load" file="$(find uchile_safety)/config/safety.yaml" />
 
 	 	<!-- odometry -->
-	 	<remap from="~odom"          to="/bender/nav/odom"/>
+	 	<remap from="~odom" to="/bender/nav/odom"/>
 
 	 	<!-- input sensors -->
-	 	<remap from="~scan_front"    to="/bender/sensors/laser_front/scan_filtered"/>
-	 	<remap from="~scan_rear"     to="/bender/sensors/laser_rear/scan"/>
+	 	<remap from="~scan_front" to="/bender/sensors/laser_front/scan_filtered"/>
+	 	<remap from="~scan_rear"  to="/bender/sensors/laser_rear/scan_filtered"/>
 
 	 	<!-- cmd_vel -->
-	 	<remap from="~input" to="/bender/nav/mux/cmd_vel"/>
+	 	<remap from="~input"  to="/bender/nav/mux/cmd_vel"/>
 	 	<remap from="~output" to="~cmd_vel"/>
 
 	 	<!-- This remmap exists for the follow skill only -->

@@ -1,0 +1,17 @@
+<launch>
+
+	<!-- laser front filtering -->
+	<include file="$(find uchile_laser_pipeline)/launch/laser_pipeline.launch">
+		<arg name="name"        value="front"/>
+		<arg name="input_scan"  value="/bender/sensors/laser_front/scan"/>
+		<arg name="output_scan" value="/bender/sensors/laser_front/scan_filtered"/>
+	</include>
+
+	<!-- laser rear filtering -->
+	<include file="$(find uchile_laser_pipeline)/launch/laser_pipeline.launch">
+		<arg name="name"        value="rear"/>
+		<arg name="input_scan"  value="/bender/sensors/laser_rear/scan"/>
+		<arg name="output_scan" value="/bender/sensors/laser_rear/scan_filtered"/>
+	</include>
+
+</launch>
