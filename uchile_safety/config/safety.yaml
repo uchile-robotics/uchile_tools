@@ -24,7 +24,7 @@ cmd_timeout: 0.5  # [s]. How long it takes to consider the cmd_vel command to be
 robot_radius             : 0.30  # [m]. This is the real robot radius.
 min_distance_to_obstacles: 0.15  # [m]. How many meters away from obstacles the robot will stop movement.
                                  # This is added to the robot radius in order to compute the minimum inflation radius.
-is_debug_enabled         : true  # prints debug information.
+is_debug_enabled         : false # prints debug information.
 is_visualization_enabled : true  # process markers for RVIZ. This can be a drawback on slower
                                  # systems or when the sensor resolution is too high.
 max_obstacle_range  : 1.5   # [m] ignore obstacles outside this radius
