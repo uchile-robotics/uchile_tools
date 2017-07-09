@@ -25,7 +25,6 @@
   <buildtool_depend>catkin</buildtool_depend>
 
   <build_depend>uchile_msgs</build_depend>
-  <build_depend>bender_sensors</build_depend>
   <build_depend>uchile_srvs</build_depend>
   <build_depend>cv_bridge</build_depend>
   <build_depend>geometry_msgs</build_depend>
