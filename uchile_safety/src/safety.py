@@ -751,7 +751,7 @@ def _is_something_obsolete(now, last, timeout):
 
 
 def main():
-    rospy.init_node('cmd_vel_low_level_safety')
+    rospy.init_node('safety_layer')
     safe = CmdVelSafety()
     if not safe.setup():
         return False
