@@ -25,10 +25,10 @@ cmd_timeout : 0.5  # [s]. How long it takes to consider the cmd_vel command to b
 # - it considers different sizes to check depending on the motion direction.
 # - please be accurate, but do not understimate this.
 # - padding values are added to the robot footprint in order to compute the inflation radius.
-robot_width       : 0.70  # [m] Estimated robot width (y axis). 
-robot_length_front: 0.30  # [m] Estimated robot length on x axis. From center to front most point.
+robot_width       : 0.66  # [m] Estimated robot width (y axis). 
+robot_length_front: 0.25  # [m] Estimated robot length on x axis. From center to front most point.
 robot_length_rear : 0.30  # [m] Estimated robot length on x axis. From center to rear most point.
-padding_sides: 0.05  # [m] Minimum distance to obstacles on each side of the robot.
+padding_sides: 0.03  # [m] Minimum distance to obstacles on each side of the robot.
 padding_rear : 0.20  # [m] Minimum distance to obstacles on the robot rear direction.
 padding_front: 0.20  # [m] Minimum distance to obstacles on the robot front direction.
 
