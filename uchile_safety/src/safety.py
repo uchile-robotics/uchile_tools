@@ -34,9 +34,12 @@ class CmdVelSafety(object):
          a velocity reduction at that accel level. That is equivalent to send a stop command
          and let the robot do the stopping job for you.
 
+    - Q: This layer should consider sensor noise and preprocessing?
+      A: No. As a design consideration, this layer should be keep as clean as possible.
+         Input sensor streams should have been already preprocessed before usage.
+
     To Do List:
     ------------------------------
-    TODO: Manejar ruido de sensores ... moving average?
     TODO: Manejo de puntos ciegos ... que pasa si estaba previamente inscrito
     TODO: Caso en que radio curvatura cae dentro del robot
 
@@ -80,14 +83,22 @@ class CmdVelSafety(object):
         self.laser_rear_base_dist = None
         self.laser_rgbd_base_dist = None
 
+        # robot model and margins
+        robot_width = rospy.get_param("~robot_width", 0.4)
+        robot_length_front = rospy.get_param("~robot_length_front", 0.4)
+        robot_length_rear = rospy.get_param("~robot_length_rear", 0.4)
+        padding_sides = rospy.get_param("~padding_sides", 0.1)
+        padding_rear = rospy.get_param("~padding_rear", 0.1)
+        padding_front = rospy.get_param("~padding_front", 0.1)
+        self.padded_robot_width = (robot_width / 2.0) + padding_sides
+        self.padded_robot_length_front = robot_length_front + padding_front
+        self.padded_robot_length_rear = robot_length_rear + padding_rear
+
         # misc
         control_rate = rospy.get_param("~control_rate", 10)
         odom_timeout = rospy.get_param("~odom_timeout", 0.5)
         cmd_timeout = rospy.get_param("~cmd_timeout", 0.5)
         sim_lookahead_factor = rospy.get_param("~sim_lookahead_factor", 3.0)
-        robot_radius = rospy.get_param("~robot_radius", 0.4)
-        min_distance_to_obstacles = rospy.get_param("~min_distance_to_obstacles", 0.1)
-        self.min_inflation_radius = robot_radius + min_distance_to_obstacles
         self.sim_time = float(sim_lookahead_factor) / float(control_rate)
         self.is_debug_enabled = rospy.get_param("~is_debug_enabled", False)
         self.is_visualization_enabled = rospy.get_param("~is_visualization_enabled", False)
@@ -254,7 +265,7 @@ class CmdVelSafety(object):
     # Aux methods
     # =========================================================================
 
-    def get_inflated_radius(self, cmd_vel):
+    def get_inflated_radius(self, cmd_vel, min_inflation_radius):
         """
         Computes an inflated footprint for linear movements.
 
@@ -284,7 +295,7 @@ class CmdVelSafety(object):
             a = linear_vel * linear_vel
             b = (2.0 * self.linear_decel)
             inflated = a / b
-        return self.min_inflation_radius + inflated
+        return min_inflation_radius + inflated
 
     def get_curvature_radius(self, cmd_vel):
         if abs(cmd_vel.angular.z) < self.min_angular_vel:
@@ -350,8 +361,8 @@ class CmdVelSafety(object):
 
         # compute small and big toroid circle params
         rm = curvature_radius
-        r1 = curvature_radius - self.min_inflation_radius
-        r2 = curvature_radius + self.min_inflation_radius
+        r1 = curvature_radius - self.padded_robot_width
+        r2 = curvature_radius + self.padded_robot_width
         x0 = 0
         y0 = linear_orientation * angular_orientation * rm
 
@@ -380,7 +391,7 @@ class CmdVelSafety(object):
                     continue
 
                 # obstacle inside the rectangle
-                if abs(y) > self.min_inflation_radius:
+                if abs(y) > self.padded_robot_width:
                     dangerous.append(obstacle)
                     continue
 
@@ -507,7 +518,8 @@ class CmdVelSafety(object):
             # --- movement properties ---
             linear_orientation = self.get_linear_movement_orientation(target_vel)
             angular_orientation = self.get_angular_movement_orientation(target_vel)
-            inflated_radius = self.get_inflated_radius(target_vel)
+            min_inflation_radius = self.padded_robot_length_front if linear_orientation > 0 else self.padded_robot_length_rear
+            inflated_radius = self.get_inflated_radius(target_vel, min_inflation_radius)
             curvature_radius = self.get_curvature_radius(target_vel)
             if linear_orientation == 0 and angular_orientation == 0:
                 # target velocity is the required velocity is too small, because of a in(de)crement
@@ -632,8 +644,8 @@ class CmdVelSafety(object):
         marker.color.b = 1.0
         marker.color.a = 1.0
         sections = 20
-        r1 = curvature_radius - self.min_inflation_radius
-        r2 = curvature_radius + self.min_inflation_radius
+        r1 = curvature_radius - self.padded_robot_width
+        r2 = curvature_radius + self.padded_robot_width
 
         # only linear velocity
         if curvature_radius == 0.0:
