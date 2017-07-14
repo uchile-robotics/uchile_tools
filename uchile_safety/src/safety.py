@@ -32,7 +32,7 @@ class CmdVelSafety(object):
     - Q: Why not to reduce the velocity step by step, but to send stop commands?
       A: As the inflation radius is computed using the robot decel, you must send at least
          a velocity reduction at that accel level. That is equivalent to send a stop command
-         and let the robot do the stopping job for you. 
+         and let the robot do the stopping job for you.
 
     To Do List:
     ------------------------------
@@ -140,6 +140,7 @@ class CmdVelSafety(object):
     # =========================================================================
 
     def _setup_subscribers(self):
+        rospy.loginfo("Setting up subscribers ...")
         self.laser_front_sub = rospy.Subscriber('~scan_front', LaserScan, self.laser_front_callback, queue_size=1)
         self.laser_rear_sub = rospy.Subscriber('~scan_rear', LaserScan, self.laser_rear_callback, queue_size=1)
         self.laser_rgbd_sub = rospy.Subscriber('~scan_rgbd', LaserScan, self.laser_rgbd_callback, queue_size=1)
@@ -187,15 +188,16 @@ class CmdVelSafety(object):
                 self.laser_front_base_dist = _distance(front_laser_pose.pose.position, Point())
                 self.laser_rear_base_dist = _distance(rear_laser_pose.pose.position, Point())
                 self.laser_rgbd_base_dist = _distance(rgbd_laser_pose.pose.position, Point())
-                self._setup_subscribers()
-                return True
-            except Exception as e:
-                rospy.logerr_throttle(
+                break
+            except rospy.ServiceException as e:
+                rospy.logwarn_throttle(
                     5.0,  # every 5 seconds
                     "Safety layer cannot start yet: Could not transform pose from between lasers ({} or {} or {}) and base ({}) frames. Because {}."
                     .format(self.laser_front_frame, self.laser_rear_frame, self.laser_rgbd_frame, self.base_frame, e))
 
-        return False
+        # setup subscribers
+        self._setup_subscribers()
+        rospy.loginfo("Safety layer succesfully started!.")
 
     # =========================================================================
     # ROS Callbacks
@@ -456,13 +458,23 @@ class CmdVelSafety(object):
             now = rospy.Time.now()
             is_odom_obsolete = _is_something_obsolete(now, _odom_time, self.odom_timeout)
             is_cmd_obsolete = _is_something_obsolete(now, _cmd_time, self.cmd_timeout)
-            is_moving = (not is_cmd_obsolete) and self.attempts_to_move(_odom_vel)
-            wants_to_move = (not is_odom_obsolete) and self.attempts_to_move(_cmd_vel)
+            is_moving = (not is_odom_obsolete) and self.attempts_to_move(_odom_vel)
+            wants_to_move = (not is_cmd_obsolete) and self.attempts_to_move(_cmd_vel)
 
             # --- odometry is obsolete ---
             if is_odom_obsolete:
+                # TODO: this check will prevent moving the base when no
+                # odometry has been received, which is a requirement!!!,
+                # but the message should be "No odometry message has been
+                # received..."
+                sec_delta = (now - _odom_time).to_sec()
+                sec_timeout = self.odom_timeout.to_sec()
                 self.send_velocity(Twist())
-                rospy.logwarn_throttle(5.0, "Robot odometry is obsolete. Won't move.")
+                rospy.logwarn_throttle(
+                    5.0,
+                    "Robot odometry is obsolete. Won't move. Last message was received %.2f [s] ago (timeout: %.2f [s])."
+                    % (sec_delta, sec_timeout)
+                )
                 self.spin_rate.sleep()
                 return
 
@@ -470,7 +482,7 @@ class CmdVelSafety(object):
             if not is_moving and not wants_to_move:
                 # stop the robot... just in case. enforce
                 self.send_velocity(Twist())
-                rospy.loginfo_throttle(5.0, "Robot is stopped and no command has been issued. Enforcing stop state. This is just informative.")
+                rospy.loginfo_throttle(10.0, "Robot is stopped and no command has been issued. Enforcing stop state. This is just informative.")
                 self.spin_rate.sleep()
                 return
 
@@ -556,11 +568,14 @@ class CmdVelSafety(object):
                     + "\n  - %3d other" % (len(candidate_obstacles))
                     + "\n  - %3d ignored" % (remaining_obstacles)
                 )
-
             if real_obstacles:
                 # Send stop signals!
                 self.stop_motion()
-                rospy.logwarn_throttle(3.0, "Dangerous input cmd_vel wont be applied!")
+                rospy.logwarn_throttle(
+                    3.0,
+                    "Dangerous input cmd_vel won't be applied!: (linear: %.2f[m/s], angular %.2f[rad/s])"
+                    % (_cmd_vel.linear.x, _cmd_vel.angular.z)
+                )
             else:
                 # The velocity command is safe... send it!
                 self.send_velocity(_cmd_vel)
@@ -578,7 +593,7 @@ class CmdVelSafety(object):
                 )
 
         except Exception as e:
-            rospy.logerr("An error occurred. Sending stop cmd_vel to the base. Error description: %s" % e)
+            rospy.logerr_throttle(5.0, "An error occurred. Sending stop cmd_vel to the base. Error description: %s" % e)
             self.stop_motion()
 
         self.spin_rate.sleep()
@@ -727,34 +742,36 @@ class CmdVelSafety(object):
 
 
 def _distance(p1, p2):
-        """
-        Returns the euclidean distance between 2 geometry_msgs/Point objects
-        """
-        dx = (p1.x - p2.x)
-        dy = (p1.y - p2.y)
-        dz = (p1.z - p2.z)
-        return sqrt(dx * dx + dy * dy + dz * dz)
+    """
+    Returns the euclidean distance between 2 geometry_msgs/Point objects
+    """
+    dx = (p1.x - p2.x)
+    dy = (p1.y - p2.y)
+    dz = (p1.z - p2.z)
+    return sqrt(dx * dx + dy * dy + dz * dz)
 
 
 def _is_point_inside_circle(r, x0, y0, x, y):
-        dx = (x - x0)
-        dy = (y - y0)
-        if dx * dx + dy * dy <= r * r:
-            return True
-        return False
+    dx = (x - x0)
+    dy = (y - y0)
+    if dx * dx + dy * dy <= r * r:
+        return True
+    return False
 
 
 def _is_something_obsolete(now, last, timeout):
-        if (now - last) > timeout:
-            return True
-        return False
+    if (now - last) > timeout:
+        return True
+    return False
 
 
 def main():
     rospy.init_node('safety_layer')
     safe = CmdVelSafety()
-    if not safe.setup():
-        return False
+    try:
+        safe.setup()
+    except Exception as e:
+        raise e
 
     while not rospy.is_shutdown():
         safe.spin_once()

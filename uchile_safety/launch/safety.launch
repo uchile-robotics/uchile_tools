@@ -1,8 +1,8 @@
 <launch>
 
-	<node pkg="uchile_safety" type="safety.py" name="safety" ns="/bender/nav/" respawn="true" respawn_delay="2">
+	<node pkg="uchile_safety" type="safety.py" name="safety" ns="/bender/nav/" respawn="true" respawn_delay="2" output="screen">
 
-	 	<rosparam command="load" file="$(find uchile_safety)/config/safety.yaml" />
+	 	<rosparam command="load" file="$(find uchile_safety)/config/safety.yaml"/>
 
 	 	<!-- odometry -->
 	 	<remap from="~odom" to="/bender/nav/odom"/>
