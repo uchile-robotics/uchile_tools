@@ -23,14 +23,21 @@ scan_filter_chain:
     # Upper range threshold
     upper_threshold: .inf
 
-# This is a filter which removes points inside a polygon, which is obtained as
-# a geometry_msgs::PolygonStamped from a ROS topic.
-# It was designed to filter points colliding with the robot arms.
+# # This is a filter which removes points colliding with the robot hands, whose
+# # position is obtained from the target_frames parameter. A sphere of radius
+# # hand_radius[i] and centered at target_frames[i] is generated and removed 
+# # from laser readings.
+# # 
+# # The filter also provides a dynamic_reconfigure server to update each radius.
+# # This is useful to also delete points which could collide with grasped 
+# # obstacles.
 # - name: robot_self_arms_filter
 #   type: uchile_laser_pipeline/LaserScanSelfFilter
 #   params:
-#     target_frames: [ "bender/l_int_finger_link", "bender/r_int_finger_link" ]
-#     inflation_radius_list: [ 0.20, 0.20 ]
+#     l_hand_link: "bender/l_grasp_link"
+#     r_hand_link: "bender/r_grasp_link"
+#     l_hand_radius: 0.20
+#     r_hand_radius: 0.20
 
 # # This filter removes laser readings that are most likely caused by the
 # # veiling effect when the edge of an object is being scanned. For any two
