@@ -5,11 +5,23 @@ project(uchile_laser_pipeline)
 # Find dependencies
 ##############################################################################
 
-set(THIS_PACKAGE_ROS_DEPS sensor_msgs roscpp tf filters message_filters
-  laser_geometry pluginlib angles dynamic_reconfigure visualization_msgs)
+set(THIS_PACKAGE_ROS_DEPS 
+  angles
+  dynamic_reconfigure
+  filters
+  laser_filters
+  laser_geometry
+  message_filters
+  pluginlib
+  roscpp
+  rostest
+  sensor_msgs
+  tf
+  visualization_msgs
+)
 
 find_package(catkin REQUIRED COMPONENTS ${THIS_PACKAGE_ROS_DEPS})
-find_package(Boost REQUIRED COMPONENTS system signals)
+find_package(Boost REQUIRED COMPONENTS signals system)
 include_directories(include ${catkin_INCLUDE_DIRS} ${Boost_INCLUDE_DIRS})
 
 # dynamic_reconfigure

@@ -4,19 +4,21 @@ project(uchile_fun)
 include($ENV{ROS_ROOT}/core/rosbuild/FindPkgConfig.cmake)
 
 find_package(catkin REQUIRED COMPONENTS
-  message_generation
-  uchile_msgs
-  uchile_srvs
   cv_bridge
   geometry_msgs
   image_transport
-  pcl_ros
+  message_generation
   pcl_conversions
+  pcl_ros
   roscpp
   roslib
   sensor_msgs
+  sound_play
   std_msgs
   std_srvs
+  tf
+  uchile_msgs
+  uchile_srvs
 )
 find_package(OpenCV  REQUIRED)
 
@@ -39,17 +41,24 @@ generate_messages(
 )
 
 catkin_package(
-#  INCLUDE_DIRS include
   LIBRARIES uchile_fun
-  CATKIN_DEPENDS message_runtime uchile_msgs uchile_srvs roscpp roslib std_msgs
+  CATKIN_DEPENDS
+    geometry_msgs
+    message_runtime
+    pcl_conversions
+    roscpp
+    roslib
+    sensor_msgs
+    std_msgs
+    uchile_msgs
+    uchile_srvs
   DEPENDS opencv2
 )
+
 
 ###########
 ## Build ##
 ###########
-
-
 
 include_directories(
   ${catkin_INCLUDE_DIRS} ${OpenCV_INCLUDE_DIRS}

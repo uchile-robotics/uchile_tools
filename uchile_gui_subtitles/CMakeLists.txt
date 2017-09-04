@@ -10,18 +10,23 @@ project(uchile_gui_subtitles)
 ##############################################################################
 
 find_package(catkin REQUIRED COMPONENTS
-	qt_build
-	roscpp
-	std_msgs
-	uchile_msgs
-	uchile_srvs
+    qt_build
+    roscpp
+    std_msgs
+    uchile_msgs
+    uchile_srvs
 )
 include_directories(${catkin_INCLUDE_DIRS})
 
 # Use this to define what the package will export (e.g. libs, headers).
 # Since the default here is to produce only a binary, we don't worry about
 # exporting anything. 
-catkin_package()
+catkin_package(
+    CATKIN_DEPENDS
+        std_msgs
+        uchile_msgs
+        uchile_srvs
+)
 
 ##############################################################################
 # Qt Environment
@@ -37,11 +42,11 @@ rosbuild_prepare_qt4(QtCore QtGui) # Add the appropriate components to the compo
 
 file(GLOB QT_FORMS RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} ui/*.ui)
 file(GLOB QT_RESOURCES RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} resources/*.qrc)
-file(GLOB_RECURSE QT_MOC RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} FOLLOW_SYMLINKS include/uchile_gui_subtitles/*.hpp)
+file(GLOB_RECURSE QT_MOC RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} FOLLOW_SYMLINKS include/${PROJECT_NAME}/*.hpp)
 
-QT4_ADD_RESOURCES(QT_RESOURCES_CPP ${QT_RESOURCES})
-QT4_WRAP_UI(QT_FORMS_HPP ${QT_FORMS})
-QT4_WRAP_CPP(QT_MOC_HPP ${QT_MOC})
+qt4_add_resources(QT_RESOURCES_CPP ${QT_RESOURCES})
+qt4_wrap_ui(QT_FORMS_HPP ${QT_FORMS})
+qt4_wrap_cpp(QT_MOC_HPP ${QT_MOC})
 
 ##############################################################################
 # Sources

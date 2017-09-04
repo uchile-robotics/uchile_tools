@@ -5,7 +5,11 @@ project(uchile_footprint_generator)
 # Find dependencies
 ##############################################################################
 
-set(THIS_PACKAGE_ROS_DEPS rospy tf geometry_msgs)
+set(THIS_PACKAGE_ROS_DEPS
+	geometry_msgs
+	rospy
+	tf
+)
 
 find_package(catkin REQUIRED COMPONENTS ${THIS_PACKAGE_ROS_DEPS})
 include_directories(

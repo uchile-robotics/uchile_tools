@@ -11,14 +11,14 @@
 ## About Modules
 # Standard ROS practice is to place Python modules under
 # the src/your_package subdirectory, making the top-level
-# module name the same as your package. Python requires 
+# module name the same as your package. Python requires
 # that directory to have an __init__.py file, too.
 #
 #
 ## About "scripts" argument
 # ROS Users should generally not use the scripts argument, as in ROS,
 # executables should be executed using rosrun rather than being installed
-# to the global bin folder. One way of installing such python scripts is 
+# to the global bin folder. One way of installing such python scripts is
 # to add the following to the CMakeLists.txt:
 #
 #    install(PROGRAMS scripts/myscript

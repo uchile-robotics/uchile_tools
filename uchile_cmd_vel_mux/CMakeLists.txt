@@ -20,7 +20,12 @@ generate_dynamic_reconfigure_options(cfg/reload.cfg)
 catkin_package(
   INCLUDE_DIRS include
   LIBRARIES ${PROJECT_NAME}_nodelet
-  CATKIN_DEPENDS roscpp pluginlib nodelet dynamic_reconfigure geometry_msgs
+  CATKIN_DEPENDS
+    dynamic_reconfigure
+    geometry_msgs
+    nodelet
+    pluginlib
+    roscpp
   DEPENDS yaml-cpp
 )
 

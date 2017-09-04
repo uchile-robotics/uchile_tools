@@ -5,11 +5,12 @@ project(bender_turning_base)
 ## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
 ## is used, also find other catkin packages
 find_package(catkin REQUIRED COMPONENTS
+  message_generation
   roscpp
+  roslib
   rosserial_arduino
   rosserial_python
   std_msgs
-  message_generation
 )
 
 ## System dependencies are found with CMake's conventions
@@ -46,10 +47,10 @@ catkin_python_setup()
 ##   * add every package in MSG_DEP_SET to generate_messages(DEPENDENCIES ...)
 
 ## Generate messages in the 'msg' folder
- add_message_files(
+add_message_files(
   FILES
   platoMov.msg
- )
+)
 
 ## Generate services in the 'srv' folder
 # add_service_files(
@@ -66,10 +67,10 @@ catkin_python_setup()
 # )
 
 ## Generate added messages and services with any dependencies listed here
- generate_messages(
-   DEPENDENCIES
-   std_msgs
- )
+generate_messages(
+  DEPENDENCIES
+  std_msgs
+)
 
 ################################################
 ## Declare ROS dynamic reconfigure parameters ##
@@ -101,10 +102,16 @@ catkin_python_setup()
 ## CATKIN_DEPENDS: catkin_packages dependent projects also need
 ## DEPENDS: system dependencies of this project that dependent projects also need
 catkin_package(
-#  INCLUDE_DIRS include
-#  LIBRARIES uchile_turning_base
-#  CATKIN_DEPENDS roscpp roslib rosserial_arduino rosserial_python std_msgs
-#  DEPENDS system_lib
+  #  INCLUDE_DIRS include
+  #  LIBRARIES uchile_turning_base
+  CATKIN_DEPENDS
+    message_runtime
+    roscpp
+    roslib
+    rosserial_arduino
+    rosserial_python
+    std_msgs
+  #  DEPENDS system_lib
 )
 
 ###########

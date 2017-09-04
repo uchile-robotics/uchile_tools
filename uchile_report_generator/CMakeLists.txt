@@ -2,8 +2,6 @@ cmake_minimum_required(VERSION 2.8.3)
 project(uchile_report_generator)
 
 find_package(catkin REQUIRED COMPONENTS
-  uchile_msgs
-  uchile_srvs
   cv_bridge
   nav_msgs
   roscpp
@@ -11,6 +9,8 @@ find_package(catkin REQUIRED COMPONENTS
   sensor_msgs
   std_msgs
   std_srvs
+  uchile_msgs
+  uchile_srvs
   uchile_util
 )
 
@@ -22,7 +22,17 @@ find_package(OpenCV  REQUIRED)
 catkin_package(
   INCLUDE_DIRS include
   LIBRARIES uchile_report_generator
-  CATKIN_DEPENDS uchile_msgs uchile_srvs cv_bridge nav_msgs roscpp roslib sensor_msgs std_msgs std_srvs uchile_util
+  CATKIN_DEPENDS
+    cv_bridge
+    nav_msgs
+    roscpp
+    roslib
+    sensor_msgs
+    std_msgs
+    std_srvs
+    uchile_msgs
+    uchile_srvs
+    uchile_util
   DEPENDS opencv2
 )
 
