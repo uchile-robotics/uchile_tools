@@ -33,7 +33,7 @@ catkin_package(
     uchile_msgs
     uchile_srvs
     uchile_util
-  DEPENDS opencv2
+  DEPENDS OpenCV
 )
 
 ###########
