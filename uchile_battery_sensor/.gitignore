@@ -1,0 +1,5 @@
+*.pyc
+bni
+build
+
+src/uchile_battery_sensor/data/
