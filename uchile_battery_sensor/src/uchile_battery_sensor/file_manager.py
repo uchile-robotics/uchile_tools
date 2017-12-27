@@ -5,7 +5,7 @@ __author__ = 'gdiaz'
 class fileManager(object):
     def __init__(self, file_name, debug = False):
         self.debug = debug
-        self.file_path = "/home/robotica/uchile_ws/ros/bender/base_ws/src/uchile_tools/uchile_battery_sensor/src/uchile_battery_sensor/data/"
+        self.file_path = "/home/bender/uchile_ws/ros/bender/base_ws/src/uchile_tools/uchile_battery_sensor/src/uchile_battery_sensor/data"
         self.file_name = file_name
         self.file_ext = ".txt"
         self.full_name = self.file_path+self.file_name+self.file_ext
