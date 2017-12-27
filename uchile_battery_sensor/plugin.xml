@@ -1,0 +1,17 @@
+<library path="src">
+  <class name="BatteriesSensor" type="uchile_rqt_batteries.batteries_dashboard.BatteriesSensor" base_class_type="rqt_gui_py::Plugin">
+    <description>
+      A Python GUI plugin for displaying a dashboard that displays battery levels.
+    </description>
+    <qtgui>
+      <group>
+        <label>Robot</label>
+        <icon type="theme">folder</icon>
+        <statustip>Plugins related to specific robots.</statustip>
+      </group>
+      <label>Batteries Sensor</label>
+      <icon type="theme">task-past-due</icon>
+      <statustip>A Python GUI plugin for displaying batteries states.</statustip>
+    </qtgui>
+  </class>
+</library>

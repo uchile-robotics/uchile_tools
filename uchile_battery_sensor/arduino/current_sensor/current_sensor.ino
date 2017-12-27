@@ -1,7 +1,9 @@
 #define CURRENT_SENSOR A0
 #define VOLTAGE_SENSOR A1
+#include <Filters.h>
 
 float current = 0;
+float current_filtered = 0;
 float voltage = 0;
 float transfer_energy = 0;
 float SOC = 0;
@@ -10,10 +12,11 @@ float Qt = 0;//As
 unsigned long time;
 
 
+FilterOnePole lowpassFilter( LOWPASS, 0.5);
+
 void setup() {
     pinMode(CURRENT_SENSOR, INPUT);
     pinMode(VOLTAGE_SENSOR, INPUT);
-
 
     Serial.begin(9600);
 }
@@ -22,14 +25,15 @@ void loop() {
     time = millis();
     float current_raw = analogRead(CURRENT_SENSOR);
     float voltage_raw = analogRead(VOLTAGE_SENSOR);
-    if (current_raw>=550) current = (current_raw-550)*0.0322;
+    if (current_raw>=510) current = (current_raw-510)*0.0322;
     else current = 0;
+    current_filtered = lowpassFilter.input(current);
     if (voltage_raw>=164) voltage = (voltage_raw-164)*0.025;
     else voltage = 0;
-    Qt= Qt+ ((current*(millis()-time))/1000);//As
-    transfer_energy = transfer_energy + (voltage*current*(millis()-time)/1000);//Ws
+    Qt= Qt+ ((current_filtered*(millis()-time))/1000);//As
+    transfer_energy = transfer_energy + (voltage*current_filtered*(millis()-time)/1000);//Ws
     SOC = (1-(Qt/Q0))*100;//por revisar
-    send_data(1, transfer_energy, current, SOC, voltage);
+    send_data(1, transfer_energy, current_filtered, SOC, voltage);
 }
 
 void sendFrame(uint8_t frame[], uint8_t sz)
