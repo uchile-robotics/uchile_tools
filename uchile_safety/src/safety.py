@@ -132,7 +132,7 @@ class CmdVelSafety(object):
         # ROS Interface
 
         # Service Clients
-        self.tf_client = rospy.ServiceProxy("/bender/tf/simple_pose_transformer/transform", Transformer)
+        self.tf_client = rospy.ServiceProxy("/uchile/tf/simple_pose_transformer/transform", Transformer)
 
         # Topic Subscribers (avoid computing until setup is done)
         self.laser_front_sub = None
