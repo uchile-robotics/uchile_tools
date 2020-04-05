@@ -288,7 +288,7 @@ bool ReportGenerator::add_map(uchile_srvs::ReportGenerator::Request &req, uchile
 bool ReportGenerator::generate(uchile_srvs::ReportGenerator::Request &req, uchile_srvs::ReportGenerator::Response &res) {
 
     // create & compile tex file
-    std::cout<<report_file<<std::endl;
+    std::cout << report_file.str() << std::endl;
     writeFile(report_file.str() + ".tex", tex_code);
     compile(report_file.str() + ".tex");
 
