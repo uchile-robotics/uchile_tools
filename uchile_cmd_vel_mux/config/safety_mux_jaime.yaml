@@ -39,4 +39,4 @@ subscribers:
     priority: 99
     short_desc: "This layer should send reactive velocity commands to avoid obstacles provided by the bumper/cliff sensors."
 
-publisher: "jaime/mobile_base/commands/velocity"
+publisher: "/jaime/mobile_base/commands/velocity"
