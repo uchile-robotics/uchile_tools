@@ -1,0 +1,34 @@
+# Configuration for subscribers to cmd_vel sources.
+# The mux chooses which topic to relay to the base.
+#
+# Important: This mux does not really sends commands to the base, but to
+# another security layer mux.
+#
+# Individual subscriber configuration:
+#   name:        Source name
+#   topic:       The topic that provides cmd_vel messages
+#   timeout:     Time in seconds without incoming messages to consider this topic inactive
+#   priority:    Priority: an UNIQUE unsigned integer from 0 (lowest) to MAX_INT
+#   short_desc:  Short description (optional)
+
+subscribers:
+
+  - name: "Default Commands"
+    topic: "/jaime/nav/cmd_vel"
+    timeout: 0.1
+    priority: 0
+    short_desc: "The default cmd_vel input topic, controllers unaware that we are multiplexing cmd_vel should come here"
+
+  - name: "ROS Navigation Stack"
+    topic: "/jaime/nav/move_base/cmd_vel"
+    timeout: 0.5
+    priority: 1
+    short_desc: "ROS Navigation Stack controller. Commands from move_base."
+
+  - name: "Default Joystick (Low Priority)"
+    topic: "/jaime/joy/base/cmd_vel"
+    timeout: 5
+    priority: 2
+    short_desc: "User controlled commands. It has lower priority than the safety layer. Joysticks should use this topic by default."
+
+publisher: "/jaime/nav/mux/cmd_vel"

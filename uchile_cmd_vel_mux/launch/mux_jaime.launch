@@ -1,0 +1,27 @@
+<launch>
+
+	<node pkg="nodelet" type="nodelet" name="cmd_vel_mux_nav_nodelet_manager" args="manager" ns="/jaime/nav/"/>
+
+	<node 
+		pkg="nodelet"
+		type="nodelet"
+		name="cmd_vel_mux"
+		args="load uchile_cmd_vel_mux/CmdVelMuxNodelet cmd_vel_mux_nav_nodelet_manager"
+		ns="/jaime/nav/"
+	>
+		<param name="yaml_cfg_file" value="$(find uchile_cmd_vel_mux)/config/mux_jaime.yaml"/>
+	</node>
+
+	
+	<node
+		pkg="nodelet"
+		type="nodelet"
+		name="cmd_vel_mux_safety"
+		args="load uchile_cmd_vel_mux/CmdVelMuxNodelet cmd_vel_mux_nav_nodelet_manager"
+		ns="/jaime/nav/"
+	>
+		<param name="yaml_cfg_file" value="$(find uchile_cmd_vel_mux)/config/safety_mux_jaime.yaml"/>
+	</node>
+	
+
+</launch>
