@@ -1,0 +1,23 @@
+<launch>
+
+	<node pkg="uchile_safety" type="safety.py" name="safety" ns="/jaime/nav/" respawn="true" respawn_delay="2" output="screen">
+
+	 	<rosparam command="load" file="$(find uchile_safety)/config/safety_jaime.yaml"/>
+
+	 	<!-- odometry -->
+	 	<remap from="~odom" to="/jaime/odom"/>
+
+	 	<!-- input sensors -->
+	 	<remap from="~scan_front" to="/jaime/xbox_kinetic/scan"/>
+	 	<remap from="~scan_rear"  to="/bender/sensors/laser_rear/scan_filtered"/>
+	 	<remap from="~scan_rgbd"  to="/"/>
+
+	 	<!-- cmd_vel -->
+	 	<remap from="~input"  to="/jaime/nav/mux/cmd_vel"/>
+	 	<remap from="~output" to="~cmd_vel"/>
+
+	 	<!-- This remmap exists for the follow skill only -->
+	 	<remap from="~triggered" to="/jaime/nav/low_level_mux/obstacle"/>
+	</node>
+
+</launch>
