@@ -4,7 +4,7 @@ min_linear_vel  : 0.01  # [m/s]  . > 0. The robot is considered to be stopped if
 max_linear_vel  : 0.80  # [m/s]  . > 0. Used to enforce velocity constraints.
 min_angular_vel : 0.01  # [m/s]  . > 0. The robot is considered to be stopped if issued velocity is lesser than this.
 max_angular_vel : 0.80  # [rad/s]. > 0. Used to enforce velocity constraints.
-linear_decel  : 0.20    # [m/s/s]. > 0. 0.3 is the nominal value for Pioneer 3AT
+linear_decel  : 0.1    # [m/s/s]. > 0. 0.3 is the nominal value for Pioneer 3AT
 linear_accel  : 0.35    # [m/s/s]. > 0. 0.3 is the nominal value for Pioneer 3AT
 angular_decel : 1.50    # [rad/s/s]. > 0. 1.74 is the nominal value for Pioneer 3AT
 angular_accel : 2.00    # [rad/s/s]. > 0. 1.74 is the nominal value for Pioneer 3AT
