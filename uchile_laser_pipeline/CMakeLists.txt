@@ -51,3 +51,7 @@ target_link_libraries(uchile_laser_pipeline ${catkin_LIBRARIES} ${Boost_LIBRARIE
 # scan limiter
 add_executable(laser_scan_limiter src/laser_scan_limiter.cpp)
 target_link_libraries(laser_scan_limiter ${catkin_LIBRARIES})
+
+## Laser cropper node
+add_executable(laser_cropper src/laser_cropper.cpp)
+target_link_libraries(laser_cropper ${catkin_LIBRARIES})

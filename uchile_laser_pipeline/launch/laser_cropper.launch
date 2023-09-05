@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<launch>
+    <arg name="run_urg" default="true"/>
+    <arg name="min_angle" default="-45"/>
+    <arg name="max_angle" default="45"/>
+    <arg name="laser_topic" default="/scan"/>
+    
+    <include file="$(find urg_node)/launch/urg_lidar.launch" if="$(arg run_urg)"/>
+    
+    <node name="laser_cropper_node" pkg="urg_node" type="laser_cropper"  output="screen" respawn="true">
+        <param name="camera_fov_start_angle" value="$(arg min_angle)" />
+        <param name="camera_fov_end_angle"   value="$(arg max_angle)" />
+        <param name="laser_topic"            value="$(arg laser_topic)" />
+    </node>
+
+</launch>
