@@ -9,10 +9,11 @@ public:
 
         nh.param<double>("camera_fov_start_angle", camera_fov_start_angle, -45.0);
         nh.param<double>("camera_fov_end_angle", camera_fov_end_angle, 45.0);
-        nh.param<std::string>("laser_topic", laser_topic, "/hokuyo_front_topic");
+        nh.param<std::string>("laser_topic_in", laser_topic_in, "/hokuyo_front_topic");
+        nh.param<std::string>("laser_topic_out", laser_topic_out, "/hokuyo_cropped_topic");
 
-        lidar_full_sub = nh.subscribe("/scan", 10, &LidarCroppingNode::lidarFullCallback, this);
-        lidar_cropped_pub = nh.advertise<sensor_msgs::LaserScan>("/scan_cropped", 10);
+        lidar_full_sub = nh.subscribe(laser_topic_in, 10, &LidarCroppingNode::lidarFullCallback, this);
+        lidar_cropped_pub = nh.advertise<sensor_msgs::LaserScan>(laser_topic_out, 10);
 
         ROS_INFO("Setting lidar fov [nav] from %f to %f", camera_fov_start_angle, camera_fov_end_angle);
     }
@@ -52,7 +53,7 @@ private:
     ros::Publisher lidar_cropped_pub;
     double camera_fov_start_angle;
     double camera_fov_end_angle;
-    std::string laser_topic;
+    std::string laser_topic_in, laser_topic_out;
 
     int angleToIndex(double angle_deg, double angle_min, double angle_increment) {
         double angle_rad = degreesToRadians(angle_deg);
