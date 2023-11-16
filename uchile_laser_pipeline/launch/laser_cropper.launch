@@ -6,18 +6,20 @@
     <arg name="laser_topic_in"   default="/bender/sensors/hokuyo_front/scan"/>
     <arg name="laser_topic_out"  default="/bender/sensors/hokuyo_front/scan_cropped"/>
     
-    <node name="urg_node" pkg="urg_node" type="urg_node" output="screen">
-        <remap from="/scan" to="$(arg laser_topic_in)" />
-        <param name="ip_address" value=""/>
-        <param name="serial_port" value="/dev/ttyACM0"/>
-        <param name="serial_baud" value="115200"/>
-        <param name="frame_id" value="laser"/>
-        <param name="calibrate_time" value="true"/>
-        <param name="publish_intensity" value="false"/>
-        <param name="publish_multiecho" value="false"/>
-        <param name="angle_min" value="-1.5707963"/>
-        <param name="angle_max" value="1.5707963"/>
-    </node>
+    <group if="$(arg run_urg)">
+        <node name="urg_node" pkg="urg_node" type="urg_node" output="screen">
+            <remap from="/scan" to="$(arg laser_topic_in)" />
+            <param name="ip_address" value=""/>
+            <param name="serial_port" value="/dev/ttyACM0"/>
+            <param name="serial_baud" value="115200"/>
+            <param name="frame_id" value="laser"/>
+            <param name="calibrate_time" value="true"/>
+            <param name="publish_intensity" value="false"/>
+            <param name="publish_multiecho" value="false"/>
+            <param name="angle_min" value="-1.5707963"/>
+            <param name="angle_max" value="1.5707963"/>
+        </node>
+    </group>
     
     <node name="laser_cropper_node" pkg="uchile_laser_pipeline" type="laser_cropper"  output="screen" respawn="true">
         <param name="camera_fov_start_angle" value="$(arg min_angle)" />
